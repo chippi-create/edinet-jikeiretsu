@@ -1,8 +1,7 @@
 """
-EDINET 抽出（索引参照版・訂正優先）
-・docs_index.json から対象企業の有価証券報告書を引く（日付の巡回はしない）
-・訂正有価証券報告書(130)があれば、古い順に重ねて値を上書きする
-・どの数値がどの書類から来たかを記録する
+EDINET 抽出（索引参照版・訂正優先／紐付け検証つき）
+訂正有報は「本体より後に出ている」かつ「訂正対象の書類管理番号が本体（または既に適用した訂正）と一致する」
+ものだけを適用する。前年度の有報に対する訂正を誤って重ねないため。
 """
 
 import os
@@ -19,7 +18,6 @@ import requests
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 API_KEY = os.environ.get("EDINET_API_KEY", "")
 SEC_CODES = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
-# 訂正が出ている会社を索引から自動で選ぶ数（SEC_CODESが空のとき使う）
 AUTO_PICK = int(os.environ.get("AUTO_PICK", "5"))
 
 SLEEP = 4
@@ -132,7 +130,6 @@ def dei(rows, name):
 
 
 def normalize(text):
-    """1つの書類から meta と {指標: {年: {値, 基準}}} を取り出す"""
     rows = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
     end = dei(rows, "CurrentFiscalYearEndDateDEI")
     if len(end) < 7:
@@ -186,24 +183,20 @@ def normalize(text):
 
 
 def pick_docs(index):
-    """索引から、対象企業の本体(120)と訂正(130)を選ぶ"""
     docs = index["docs"]
     by_sec = {}
     for d in docs.values():
         sec = (d.get("secCode") or "")[:4]
-        if not sec:
-            continue
-        by_sec.setdefault(sec, []).append(d)
+        if sec:
+            by_sec.setdefault(sec, []).append(d)
 
     targets = SEC_CODES
     if not targets:
-        # 訂正が出ている会社を自動で選ぶ（訂正の中身を確認するため）
         cand = [s for s, v in by_sec.items()
                 if any(x.get("docTypeCode") == "130" for x in v)
                 and any(x.get("docTypeCode") == "120" for x in v)]
         targets = sorted(cand)[:AUTO_PICK]
-        log(f"■ 訂正のある会社を索引から自動選択: {targets}")
-        log(f"   （索引内で訂正のある会社は全部で {len(cand)}社）")
+        log(f"■ 訂正のある会社を自動選択: {targets}（該当 {len(cand)}社）")
 
     out = {}
     for sec in targets:
@@ -217,13 +210,25 @@ def pick_docs(index):
             log(f"  {sec}: 有価証券報告書(120)が索引にありません")
             continue
         main = honbun[-1]
-        # 訂正は「同じ会社・同じ決算期末」のものを古い順に
-        teisei = [d for d in lst
-                  if d.get("docTypeCode") == "130"
-                  and d.get("edinetCode") == main.get("edinetCode")
-                  and (d.get("periodEnd") == main.get("periodEnd") or not d.get("periodEnd"))]
+        main_dt = main.get("submitDateTime") or ""
+
+        teisei = []
+        skipped_old = 0
+        for d in lst:
+            if d.get("docTypeCode") != "130":
+                continue
+            if d.get("edinetCode") != main.get("edinetCode"):
+                continue
+            # 本体より前に出た訂正は、前年度以前の有報に対するもの
+            if (d.get("submitDateTime") or "") <= main_dt:
+                skipped_old += 1
+                continue
+            pe, mpe = d.get("periodEnd"), main.get("periodEnd")
+            if pe and mpe and pe != mpe:
+                continue
+            teisei.append(d)
         teisei.sort(key=lambda x: x.get("submitDateTime") or "")
-        out[sec] = {"本体": main, "訂正": teisei}
+        out[sec] = {"本体": main, "訂正": teisei, "古い訂正": skipped_old}
     return out
 
 
@@ -254,10 +259,12 @@ def main():
         log("")
         log(f"■ {sec} {main.get('filerName')}")
         log(f"   本体 {main['docID']} ({main.get('submitDateTime')}) {main.get('docDescription')}")
+        if pair["古い訂正"]:
+            log(f"   （本体より前の訂正 {pair['古い訂正']}件は前年度以前のものとして除外）")
         for t in teisei:
-            log(f"   訂正 {t['docID']} ({t.get('submitDateTime')}) {t.get('docDescription')}")
+            log(f"   訂正候補 {t['docID']} ({t.get('submitDateTime')}) {t.get('docDescription')}")
         if not teisei:
-            log("   訂正なし")
+            log("   適用対象の訂正なし")
 
         text = download_csv(main["docID"])
         if text is None:
@@ -268,21 +275,34 @@ def main():
             log("   本体を読めませんでした")
             continue
 
-        # 値ごとに出所を持たせる
         merged = {}
         for label, v in data.items():
             merged[label] = {y: dict(d, 出所=main["docID"], 種別="本体") for y, d in v.items()}
 
-        # 訂正を古い順に重ねる
+        # 訂正の連鎖に対応：本体docIDから始めて、訂正対象が一致するものだけ適用していく
+        chain = {main["docID"]}
+        applied = []
+
         for t in teisei:
             ttext = download_csv(t["docID"])
             if ttext is None:
-                log(f"   訂正 {t['docID']} のCSVを取得できませんでした（本体のまま）")
+                log(f"   訂正 {t['docID']}: CSVを取得できず（適用しません）")
                 continue
             tmeta, tdata = normalize(ttext)
             if tmeta is None:
-                log(f"   訂正 {t['docID']} は数値を含みません（本体のまま）")
+                log(f"   訂正 {t['docID']}: 数値を含まず（適用しません）")
                 continue
+
+            taisho = tmeta["訂正対象"]
+            if taisho not in chain:
+                log(f"   訂正 {t['docID']}: 訂正対象={taisho} は本体({main['docID']})と別の書類。"
+                    f"適用しません")
+                continue
+            if tmeta["kimatsu"] != meta["kimatsu"]:
+                log(f"   訂正 {t['docID']}: 決算期末が本体と違う"
+                    f"（{tmeta['kimatsu']} ≠ {meta['kimatsu']}）。適用しません")
+                continue
+
             n = 0
             for label, v in tdata.items():
                 for y, d in v.items():
@@ -290,10 +310,13 @@ def main():
                     if prev is None or prev["値"] != d["値"]:
                         n += 1
                     merged.setdefault(label, {})[y] = dict(d, 出所=t["docID"], 種別="訂正")
-            log(f"   訂正 {t['docID']}: 全{tmeta['行数']}行 / "
+            chain.add(t["docID"])
+            applied.append(t["docID"])
+            log(f"   訂正 {t['docID']}: 適用 / 全{tmeta['行数']}行 / "
                 f"XBRL訂正={tmeta['XBRL訂正']} / 指標{len(tdata)}件 / 変化した数値{n}件")
 
-        log(f"   {meta['kijun']} / 連結={meta['renketsu']} / {meta['kessan']}")
+        log(f"   {meta['kijun']} / 連結={meta['renketsu']} / {meta['kessan']}"
+            f" / 適用した訂正 {len(applied)}件")
         years = sorted({y for v in merged.values() for y in v})
         log("   " + " " * 12 + "".join(f"{y:>16}" for y in years))
         for label, _, _ in ITEMS:
@@ -317,7 +340,7 @@ def main():
             log(f"   {label:<12}" + "".join(f"{c:>16}" for c in cells))
 
         store[sec] = {"meta": meta, "data": merged,
-                      "本体": main["docID"], "訂正": [t["docID"] for t in teisei]}
+                      "本体": main["docID"], "適用した訂正": applied}
         for label, v in merged.items():
             for y, d in v.items():
                 all_rows.append({

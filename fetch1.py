@@ -1,13 +1,15 @@
 """
-EDINET 動作確認スクリプト（診断モード付き）
-証券コードだけでなく社名でも照合し、書類種別を問わず候補を全部表示する。
-有価証券報告書が見つかればそのままCSVを取得して中身を出す。
+EDINET 複数社まとめ取得＋名寄せ（検証版）
+指定期間の書類一覧を1回だけなめて、対象企業ぜんぶの有価証券報告書を集め、
+CSVを取得して指標を名寄せし、時系列の表にする。
 """
 
 import os
 import io
+import re
 import csv
 import sys
+import json
 import time
 import zipfile
 import datetime
@@ -16,189 +18,223 @@ import requests
 
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 API_KEY = os.environ.get("EDINET_API_KEY", "")
-SEC_CODE = os.environ.get("SEC_CODE", "7203").strip()
-NAME_KEYWORD = os.environ.get("NAME_KEYWORD", "トヨタ自動車").strip()
-START = os.environ.get("START", "2026-06-15").strip()
+SEC_CODES = [c.strip() for c in os.environ.get("SEC_CODES", "7203").split(",") if c.strip()]
+START = os.environ.get("START", "2026-05-01").strip()
 END = os.environ.get("END", "2026-07-10").strip()
 
 SLEEP = 4
+RETRY = 3
 OUT_DIR = "out"
 DOC_TYPE_YUHO = "120"
 
-KEYWORDS = [
-    "売上", "営業利益", "経常利益", "純利益", "純損失",
-    "総資産", "純資産", "自己資本", "従業員", "平均年間給与",
-    "営業活動によるキャッシュ", "1株当たり",
+# 相対年度 -> 当期から何年さかのぼるか
+REL2OFFSET = {
+    "当期": 0, "当期末": 0, "当期末時点": 0,
+    "前期": 1, "前期末": 1,
+    "前々期": 2, "前々期末": 2,
+    "三期前": 3, "三期前時点": 3,
+    "四期前": 4, "四期前時点": 4,
+}
+
+# 指標名 -> (連結で使う要素ローカル名の候補, 単体で使う候補)
+# 上から順に試して、最初に見つかったものを採用する
+ITEMS = [
+    ("売上高",
+     [r"^(OperatingRevenues|Revenue|Revenues|NetSales|TotalNetRevenues|SalesRevenues|OperatingRevenue).*IFRS(KeyFinancialData|SummaryOfBusinessResults)$",
+      r"^NetSalesSummaryOfBusinessResults$",
+      r"^(OperatingRevenues|Revenue|Revenues|NetSales).*(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^NetSalesSummaryOfBusinessResults$"]),
+
+    ("純利益",
+     [r"^ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults$",
+      r"^ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults$",
+      r"^NetIncomeLossSummaryOfBusinessResults$"],
+     [r"^NetIncomeLossSummaryOfBusinessResults$"]),
+
+    ("経常利益",
+     [r"^OrdinaryIncomeLossSummaryOfBusinessResults$"],
+     [r"^OrdinaryIncomeLossSummaryOfBusinessResults$"]),
+
+    ("総資産",
+     [r"^TotalAssetsIFRSSummaryOfBusinessResults$",
+      r"^TotalAssetsSummaryOfBusinessResults$"],
+     [r"^TotalAssetsSummaryOfBusinessResults$"]),
+
+    ("純資産",
+     [r"^EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults$",
+      r"^NetAssetsSummaryOfBusinessResults$"],
+     [r"^NetAssetsSummaryOfBusinessResults$"]),
+
+    ("営業CF",
+     [r"^CashFlowsFromUsedInOperatingActivitiesIFRSSummaryOfBusinessResults$",
+      r"^NetCashProvidedByUsedInOperatingActivitiesSummaryOfBusinessResults$",
+      r"^CashFlowsFromUsedInOperatingActivitiesSummaryOfBusinessResults$"],
+     []),
+
+    # 注意：IFRSの自己資本比率は RatioOfOwnersEquityToGrossAssets の方。
+    # EquityToAssetRatioIFRS... は項目名がずれていて中身は1株当たり持分なので使わない。
+    ("自己資本比率",
+     [r"^RatioOfOwnersEquityToGrossAssetsIFRSSummaryOfBusinessResults$",
+      r"^EquityToAssetRatioSummaryOfBusinessResults$"],
+     [r"^EquityToAssetRatioSummaryOfBusinessResults$"]),
+
+    ("ROE",
+     [r"^RateOfReturnOnEquityIFRSSummaryOfBusinessResults$",
+      r"^RateOfReturnOnEquitySummaryOfBusinessResults$"],
+     [r"^RateOfReturnOnEquitySummaryOfBusinessResults$"]),
+
+    ("EPS",
+     [r"^BasicEarningsLossPerShareIFRSSummaryOfBusinessResults$",
+      r"^BasicEarningsLossPerShareSummaryOfBusinessResults$"],
+     [r"^BasicEarningsLossPerShareSummaryOfBusinessResults$"]),
+
+    ("従業員数",
+     [r"^NumberOfEmployeesIFRSSummaryOfBusinessResults$",
+      r"^NumberOfEmployeesSummaryOfBusinessResults$"],
+     []),
 ]
 
-
-def log(*args):
-    print(*args, flush=True)
+NULLS = ("", "-", "－", "―", "NA")
 
 
-def daterange(start_str, end_str):
-    d = datetime.date.fromisoformat(start_str)
-    end = datetime.date.fromisoformat(end_str)
+def log(*a):
+    print(*a, flush=True)
+
+
+def daterange(s, e):
+    d = datetime.date.fromisoformat(s)
+    end = datetime.date.fromisoformat(e)
     while d <= end:
         yield d
         d += datetime.timedelta(days=1)
 
 
-def is_candidate(doc):
-    """証券コードの先頭4桁が一致、または社名にキーワードを含むものを候補にする"""
-    sec = (doc.get("secCode") or "")
-    if SEC_CODE and sec[:4] == SEC_CODE:
-        return True
-    name = (doc.get("filerName") or "")
-    if NAME_KEYWORD and NAME_KEYWORD in name:
-        return True
-    return False
+def get(url, params, timeout):
+    """失敗しても黙って飛ばさず、必ず再試行する"""
+    last = None
+    for i in range(RETRY):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            time.sleep(SLEEP)
+            if r.status_code == 200:
+                return r
+            last = f"HTTP {r.status_code}"
+        except Exception as e:
+            last = str(e)
+            time.sleep(SLEEP)
+        if i < RETRY - 1:
+            log(f"      再試行 {i + 1}/{RETRY - 1}（{last}）")
+    return None
 
 
-def collect():
-    log(f"■ 診断モード")
-    log(f"   証券コード : {SEC_CODE!r}")
-    log(f"   社名キーワード : {NAME_KEYWORD!r}")
-    log(f"   期間 : {START} 〜 {END}")
+def collect_docs():
+    targets = set(SEC_CODES)
+    found = {}
+    failed_days = []
+
+    log(f"■ 対象 {len(targets)}社: {', '.join(SEC_CODES)}")
+    log(f"■ 期間 {START} 〜 {END}")
     log("")
 
-    candidates = []
-    printed_keys = False
-
     for d in daterange(START, END):
-        try:
-            r = requests.get(
-                f"{BASE}/documents.json",
-                params={"date": d.isoformat(), "type": 2, "Subscription-Key": API_KEY},
-                timeout=60,
-            )
-        except Exception as e:
-            log(f"  {d} 取得エラー: {e}")
-            time.sleep(SLEEP)
-            continue
-
-        time.sleep(SLEEP)
-
-        if r.status_code != 200:
-            log(f"  {d} HTTP {r.status_code}")
+        r = get(f"{BASE}/documents.json",
+                {"date": d.isoformat(), "type": 2, "Subscription-Key": API_KEY}, 60)
+        if r is None:
+            log(f"  {d} 取得できませんでした")
+            failed_days.append(d.isoformat())
             continue
 
         results = r.json().get("results") or []
+        hits = []
+        for doc in results:
+            sec = (doc.get("secCode") or "")[:4]
+            if sec in targets and doc.get("docTypeCode") == DOC_TYPE_YUHO:
+                if sec not in found:
+                    found[sec] = doc
+                    hits.append(f"{sec} {doc.get('filerName')}")
 
-        # 最初にデータが取れた日だけ、1件目の項目名を出して構造を確認する
-        if results and not printed_keys:
-            printed_keys = True
-            log("  【参考】1件目のデータ項目:")
-            log(f"    {list(results[0].keys())}")
-            log("  【参考】1件目の中身:")
-            for k in ("docID", "edinetCode", "secCode", "filerName",
-                      "docTypeCode", "docDescription", "ordinanceCode", "formCode"):
-                log(f"    {k} = {results[0].get(k)!r}")
-            log("")
+        mark = "  ★ " + " / ".join(hits) if hits else ""
+        log(f"  {d} {len(results):>5}件{mark}")
 
-        n120 = sum(1 for doc in results if doc.get("docTypeCode") == DOC_TYPE_YUHO)
-        hits = [doc for doc in results if is_candidate(doc)]
-
-        log(f"  {d} 全{len(results)}件 / 有報(120)は{n120}件 / 候補{len(hits)}件")
-
-        for doc in hits:
-            log("     -> docTypeCode={} secCode={!r} {} ｜ {}".format(
-                doc.get("docTypeCode"),
-                doc.get("secCode"),
-                doc.get("filerName"),
-                doc.get("docDescription"),
-            ))
-            candidates.append(doc)
-
-    return candidates
+    log("")
+    log(f"■ 見つかった: {len(found)}社 / 未発見: {sorted(targets - set(found))}")
+    if failed_days:
+        log(f"■ 取得できなかった日（要再実行）: {failed_days}")
+    return found, failed_days
 
 
 def download_csv(doc_id):
-    log("")
-    log(f"■ CSVをダウンロードします（docID={doc_id}）")
-    r = requests.get(
-        f"{BASE}/documents/{doc_id}",
-        params={"type": 5, "Subscription-Key": API_KEY},
-        timeout=300,
-    )
-    time.sleep(SLEEP)
-
-    if r.status_code != 200:
-        log(f"  ダウンロード失敗 HTTP {r.status_code}")
+    r = get(f"{BASE}/documents/{doc_id}", {"type": 5, "Subscription-Key": API_KEY}, 300)
+    if r is None:
         return None
-
-    os.makedirs(OUT_DIR, exist_ok=True)
-
     try:
         z = zipfile.ZipFile(io.BytesIO(r.content))
     except zipfile.BadZipFile:
-        log("  ZIPとして開けませんでした（CSVが提供されていない書類の可能性）")
         return None
-
     names = [n for n in z.namelist() if n.lower().endswith(".csv")]
-    log(f"  ZIPの中のCSV: {len(names)}件")
-    for n in names:
-        log(f"    - {n}")
-
     target = None
     for n in names:
         if os.path.basename(n).startswith("jpcrp"):
             target = n
             break
-    if target is None and names:
-        target = names[0]
     if target is None:
-        log("  CSVが見つかりませんでした")
         return None
-
-    log(f"  使うファイル: {target}")
-
-    text = z.read(target).decode("utf-16")
-
-    saved = os.path.join(OUT_DIR, f"{doc_id}.csv")
-    with open(saved, "w", encoding="utf-8", newline="") as f:
-        f.write(text)
-    log(f"  UTF-8に変換して保存しました: {saved}")
-
-    return text
+    return z.read(target).decode("utf-16")
 
 
-def show(text):
-    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
-    rows = list(reader)
+def dei(rows, name):
+    for r in rows:
+        if r["要素ID"] == "jpdei_cor:" + name:
+            return (r["値"] or "").strip()
+    return ""
 
-    log("")
-    log(f"■ 全 {len(rows)} 行")
-    log(f"   列名: {reader.fieldnames}")
 
-    def col(row, name):
-        return (row.get(name) or "").strip()
+def normalize(text):
+    rows = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
 
-    log("")
-    log("■ 主要な経営指標等の推移（要素IDに SummaryOfBusinessResults を含む行）")
-    summary = [r for r in rows if "SummaryOfBusinessResults" in col(r, "要素ID")]
-    log(f"   {len(summary)} 行")
-    for r in summary:
-        log("   | {:<12} | {:<28} | {:<8} | {:>18} | {}".format(
-            col(r, "相対年度")[:12],
-            col(r, "項目名")[:28],
-            col(r, "連結・個別")[:8],
-            col(r, "値")[:18],
-            col(r, "要素ID"),
-        ))
+    end = dei(rows, "CurrentFiscalYearEndDateDEI")
+    if len(end) < 7:
+        return None, None
+    base_year = int(end[:4])
 
-    log("")
-    log("■ キーワードに一致した行（先頭60件）")
-    hits = [r for r in rows if any(k in col(r, "項目名") for k in KEYWORDS)]
-    log(f"   {len(hits)} 行")
-    for r in hits[:60]:
-        log("   | {:<30} | {:<14} | {:<8} | {:>18} | {}".format(
-            col(r, "項目名")[:30],
-            col(r, "相対年度")[:14],
-            col(r, "連結・個別")[:8],
-            col(r, "値")[:18],
-            col(r, "要素ID"),
-        ))
+    meta = {
+        "edinet": dei(rows, "EDINETCodeDEI"),
+        "sec": dei(rows, "SecurityCodeDEI")[:4],
+        "name": dei(rows, "FilerNameInJapaneseDEI"),
+        "kijun": dei(rows, "AccountingStandardsDEI"),
+        "renketsu": dei(rows, "WhetherConsolidatedFinancialStatementsArePreparedDEI"),
+        "kessanki": end[5:7] + "月期",
+        "kijun_hi": end,
+    }
+    is_consol = (meta["renketsu"] == "true")
+
+    data = {}
+    picked_pattern = {}
+
+    for label, cons_pats, non_pats in ITEMS:
+        pats = cons_pats if is_consol else (non_pats or cons_pats)
+        want_non = not is_consol
+        for pat in pats:
+            found = {}
+            for r in rows:
+                if ("NonConsolidatedMember" in r["コンテキストID"]) != want_non:
+                    continue
+                if re.match(pat, r["要素ID"].split(":")[-1]) is None:
+                    continue
+                off = REL2OFFSET.get((r["相対年度"] or "").strip())
+                if off is None:
+                    continue
+                v = (r["値"] or "").strip()
+                if v in NULLS:
+                    continue
+                found[base_year - off] = v
+            if found:
+                data[label] = found
+                picked_pattern[label] = pat
+                break
+
+    meta["_patterns"] = picked_pattern
+    return meta, data
 
 
 def main():
@@ -206,32 +242,66 @@ def main():
         log("EDINET_API_KEY が設定されていません。")
         sys.exit(1)
 
-    candidates = collect()
+    os.makedirs(OUT_DIR, exist_ok=True)
+
+    found, failed_days = collect_docs()
+    if not found:
+        log("対象の有価証券報告書が1件も見つかりませんでした。期間を広げてください。")
+        sys.exit(1)
+
+    all_rows = []
+    store = {}
+
+    for sec, doc in found.items():
+        log("")
+        log(f"■ {sec} {doc.get('filerName')} の数値を取り出します")
+        text = download_csv(doc["docID"])
+        if text is None:
+            log("   CSVを取得できませんでした")
+            continue
+
+        with open(os.path.join(OUT_DIR, f"{sec}_{doc['docID']}.csv"), "w",
+                  encoding="utf-8", newline="") as f:
+            f.write(text)
+
+        meta, data = normalize(text)
+        if meta is None:
+            log("   中身を読めませんでした")
+            continue
+
+        log(f"   会計基準={meta['kijun']} 連結={meta['renketsu']} 決算={meta['kessanki']}")
+
+        years = sorted({y for v in data.values() for y in v})
+        log("   " + " " * 12 + "".join(f"{y:>16}" for y in years))
+        for label, _, _ in ITEMS:
+            v = data.get(label)
+            if not v:
+                log(f"   {label:<12}" + "（取得できず）")
+                continue
+            log(f"   {label:<12}" + "".join(f"{v.get(y, '-'):>16}" for y in years))
+
+        store[sec] = {"meta": meta, "data": data,
+                      "docID": doc["docID"], "submit": doc.get("submitDateTime")}
+
+        for label, v in data.items():
+            for y, val in v.items():
+                all_rows.append({
+                    "証券コード": sec, "会社名": meta["name"], "会計基準": meta["kijun"],
+                    "決算期": meta["kessanki"], "年度": y, "指標": label, "値": val,
+                })
+
+    with open(os.path.join(OUT_DIR, "timeseries.csv"), "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["証券コード", "会社名", "会計基準", "決算期", "年度", "指標", "値"])
+        w.writeheader()
+        w.writerows(all_rows)
+
+    with open(os.path.join(OUT_DIR, "store.json"), "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=1)
 
     log("")
-    log(f"■ 候補は全部で {len(candidates)} 件でした")
-
-    if not candidates:
-        log("  この会社の書類が1件も見つかりませんでした。")
-        log("  社名キーワードを短く（例: トヨタ）して試してください。")
-        sys.exit(1)
-
-    yuho = [d for d in candidates if d.get("docTypeCode") == DOC_TYPE_YUHO]
-    if not yuho:
-        log("  候補はありましたが、有価証券報告書(120)はありませんでした。")
-        log("  上の一覧の docTypeCode を見て、どれを対象にするか決めます。")
-        sys.exit(1)
-
-    doc = yuho[0]
-    log(f"  有価証券報告書を使います: {doc.get('docID')} {doc.get('filerName')}")
-
-    text = download_csv(doc["docID"])
-    if text is None:
-        sys.exit(1)
-
-    show(text)
-    log("")
-    log("■ 完了")
+    log(f"■ 完了：{len(store)}社 / {len(all_rows)}行 を out/timeseries.csv に書き出しました")
+    if failed_days:
+        log(f"■ 取得できなかった日があります: {failed_days}")
 
 
 if __name__ == "__main__":

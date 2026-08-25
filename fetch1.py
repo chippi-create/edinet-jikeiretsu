@@ -1,7 +1,7 @@
 """
-EDINET 複数社まとめ取得＋名寄せ（検証版）
-指定期間の書類一覧を1回だけなめて、対象企業ぜんぶの有価証券報告書を集め、
-CSVを取得して指標を名寄せし、時系列の表にする。
+EDINET 複数社まとめ取得＋名寄せ（v4）
+・コンテキストIDの修飾子を見て、セグメント別などの行を除外する
+・会計基準（IFRS／日本基準）の系列を両方保持し、混在した指標に印を付ける
 """
 
 import os
@@ -27,71 +27,73 @@ RETRY = 3
 OUT_DIR = "out"
 DOC_TYPE_YUHO = "120"
 
-# 相対年度 -> 当期から何年さかのぼるか
-REL2OFFSET = {
-    "当期": 0, "当期末": 0, "当期末時点": 0,
-    "前期": 1, "前期末": 1,
-    "前々期": 2, "前々期末": 2,
-    "三期前": 3, "三期前時点": 3,
-    "四期前": 4, "四期前時点": 4,
+# コンテキストIDの先頭 -> 当期から何年さかのぼるか
+CTX_HEAD = {
+    "CurrentYearDuration": 0, "CurrentYearInstant": 0,
+    "Prior1YearDuration": 1, "Prior1YearInstant": 1,
+    "Prior2YearDuration": 2, "Prior2YearInstant": 2,
+    "Prior3YearDuration": 3, "Prior3YearInstant": 3,
+    "Prior4YearDuration": 4, "Prior4YearInstant": 4,
 }
 
-# 指標名 -> (連結で使う要素ローカル名の候補, 単体で使う候補)
-# 上から順に試して、最初に見つかったものを採用する
+# (指標名, IFRS系のパターン, 日本基準系のパターン)
+# 注意点をコメントで残す。ここが名寄せ表の本体。
 ITEMS = [
+    # 売上：IFRSは会社ごとに名前が違う（OperatingRevenues / SalesAndFinancialServicesRevenue / Revenue …）
+    # 日本基準は銀行が「経常収益」= OrdinaryIncome（OrdinaryIncomeLoss＝経常利益と別物なので厳密一致）
     ("売上高",
-     [r"^(OperatingRevenues|Revenue|Revenues|NetSales|TotalNetRevenues|SalesRevenues|OperatingRevenue).*IFRS(KeyFinancialData|SummaryOfBusinessResults)$",
-      r"^NetSalesSummaryOfBusinessResults$",
-      r"^(OperatingRevenues|Revenue|Revenues|NetSales).*(KeyFinancialData|SummaryOfBusinessResults)$"],
-     [r"^NetSalesSummaryOfBusinessResults$"]),
+     [r"^(?!.*Cost).*(Revenue|Revenues|NetSales).*IFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^NetSalesSummaryOfBusinessResults$",
+      r"^OrdinaryIncomeSummaryOfBusinessResults$",
+      r"^OperatingRevenues?SummaryOfBusinessResults$",
+      r"^NetSalesJGAAPSummaryOfBusinessResults$"]),
 
-    ("純利益",
-     [r"^ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults$",
-      r"^ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults$",
-      r"^NetIncomeLossSummaryOfBusinessResults$"],
-     [r"^NetIncomeLossSummaryOfBusinessResults$"]),
+    # 営業利益：5年表に載せていない会社が多い（載っていなければ空欄）
+    ("営業利益",
+     [r"^OperatingProfitLoss.*IFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^OperatingIncomeLossSummaryOfBusinessResults$"]),
 
+    # 経常利益：IFRSには存在しない概念
     ("経常利益",
-     [r"^OrdinaryIncomeLossSummaryOfBusinessResults$"],
+     [],
      [r"^OrdinaryIncomeLossSummaryOfBusinessResults$"]),
 
+    ("純利益",
+     [r"^ProfitLossAttributableToOwnersOfParentIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults$",
+      r"^NetIncomeLossSummaryOfBusinessResults$"]),
+
     ("総資産",
-     [r"^TotalAssetsIFRSSummaryOfBusinessResults$",
-      r"^TotalAssetsSummaryOfBusinessResults$"],
+     [r"^TotalAssetsIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
      [r"^TotalAssetsSummaryOfBusinessResults$"]),
 
     ("純資産",
-     [r"^EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults$",
-      r"^NetAssetsSummaryOfBusinessResults$"],
+     [r"^EquityAttributableToOwnersOfParentIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
      [r"^NetAssetsSummaryOfBusinessResults$"]),
 
     ("営業CF",
-     [r"^CashFlowsFromUsedInOperatingActivitiesIFRSSummaryOfBusinessResults$",
-      r"^NetCashProvidedByUsedInOperatingActivitiesSummaryOfBusinessResults$",
-      r"^CashFlowsFromUsedInOperatingActivitiesSummaryOfBusinessResults$"],
-     []),
+     [r"^CashFlowsFromUsedInOperatingActivitiesIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^NetCashProvidedByUsedInOperatingActivitiesSummaryOfBusinessResults$"]),
 
-    # 注意：IFRSの自己資本比率は RatioOfOwnersEquityToGrossAssets の方。
-    # EquityToAssetRatioIFRS... は項目名がずれていて中身は1株当たり持分なので使わない。
+    # 自己資本比率：IFRSは RatioOfOwnersEquityToGrossAssets。
+    # EquityToAssetRatioIFRS… は名前に反して中身が1株当たり持分なので使わない。
     ("自己資本比率",
-     [r"^RatioOfOwnersEquityToGrossAssetsIFRSSummaryOfBusinessResults$",
-      r"^EquityToAssetRatioSummaryOfBusinessResults$"],
+     [r"^RatioOfOwnersEquityToGrossAssetsIFRSSummaryOfBusinessResults$"],
      [r"^EquityToAssetRatioSummaryOfBusinessResults$"]),
 
     ("ROE",
-     [r"^RateOfReturnOnEquityIFRSSummaryOfBusinessResults$",
-      r"^RateOfReturnOnEquitySummaryOfBusinessResults$"],
+     [r"^RateOfReturnOnEquityIFRSSummaryOfBusinessResults$"],
      [r"^RateOfReturnOnEquitySummaryOfBusinessResults$"]),
 
     ("EPS",
-     [r"^BasicEarningsLossPerShareIFRSSummaryOfBusinessResults$",
-      r"^BasicEarningsLossPerShareSummaryOfBusinessResults$"],
+     [r"^BasicEarningsLossPerShareIFRSSummaryOfBusinessResults$"],
      [r"^BasicEarningsLossPerShareSummaryOfBusinessResults$"]),
 
+    # 従業員数：素の NumberOfEmployees はセグメント別の行と同じ要素IDなので、
+    # コンテキストの修飾子で全社合計だけを拾う（parse_ctx が担当）
     ("従業員数",
-     [r"^NumberOfEmployeesIFRSSummaryOfBusinessResults$",
-      r"^NumberOfEmployeesSummaryOfBusinessResults$"],
-     []),
+     [r"^NumberOfEmployeesIFRSSummaryOfBusinessResults$", r"^NumberOfEmployees$"],
+     [r"^NumberOfEmployees(JGAAP)?SummaryOfBusinessResults$", r"^NumberOfEmployees$"]),
 ]
 
 NULLS = ("", "-", "－", "―", "NA")
@@ -110,7 +112,6 @@ def daterange(s, e):
 
 
 def get(url, params, timeout):
-    """失敗しても黙って飛ばさず、必ず再試行する"""
     last = None
     for i in range(RETRY):
         try:
@@ -127,40 +128,46 @@ def get(url, params, timeout):
     return None
 
 
+def parse_ctx(ctx):
+    """コンテキストIDから (何年前, 連結/単体) を返す。
+    セグメント別など余計な修飾が付いた行は (None, None) にして捨てる。"""
+    parts = ctx.split("_")
+    off = CTX_HEAD.get(parts[0])
+    if off is None:
+        return None, None
+    rest = parts[1:]
+    if not rest:
+        return off, "連結"
+    if rest == ["NonConsolidatedMember"]:
+        return off, "単体"
+    return None, None
+
+
 def collect_docs():
     targets = set(SEC_CODES)
     found = {}
-    failed_days = []
-
-    log(f"■ 対象 {len(targets)}社: {', '.join(SEC_CODES)}")
-    log(f"■ 期間 {START} 〜 {END}")
-    log("")
-
+    failed = []
+    log(f"■ 対象 {len(targets)}社 / 期間 {START} 〜 {END}")
     for d in daterange(START, END):
         r = get(f"{BASE}/documents.json",
                 {"date": d.isoformat(), "type": 2, "Subscription-Key": API_KEY}, 60)
         if r is None:
             log(f"  {d} 取得できませんでした")
-            failed_days.append(d.isoformat())
+            failed.append(d.isoformat())
             continue
-
         results = r.json().get("results") or []
         hits = []
         for doc in results:
             sec = (doc.get("secCode") or "")[:4]
-            if sec in targets and doc.get("docTypeCode") == DOC_TYPE_YUHO:
-                if sec not in found:
-                    found[sec] = doc
-                    hits.append(f"{sec} {doc.get('filerName')}")
-
-        mark = "  ★ " + " / ".join(hits) if hits else ""
-        log(f"  {d} {len(results):>5}件{mark}")
-
+            if sec in targets and doc.get("docTypeCode") == DOC_TYPE_YUHO and sec not in found:
+                found[sec] = doc
+                hits.append(f"{sec} {doc.get('filerName')}")
+        log(f"  {d} {len(results):>5}件" + ("  ★ " + " / ".join(hits) if hits else ""))
     log("")
-    log(f"■ 見つかった: {len(found)}社 / 未発見: {sorted(targets - set(found))}")
-    if failed_days:
-        log(f"■ 取得できなかった日（要再実行）: {failed_days}")
-    return found, failed_days
+    log(f"■ 見つかった {len(found)}社 / 未発見 {sorted(targets - set(found))}")
+    if failed:
+        log(f"■ 取得できなかった日: {failed}")
+    return found, failed
 
 
 def download_csv(doc_id):
@@ -171,15 +178,10 @@ def download_csv(doc_id):
         z = zipfile.ZipFile(io.BytesIO(r.content))
     except zipfile.BadZipFile:
         return None
-    names = [n for n in z.namelist() if n.lower().endswith(".csv")]
-    target = None
-    for n in names:
-        if os.path.basename(n).startswith("jpcrp"):
-            target = n
-            break
-    if target is None:
-        return None
-    return z.read(target).decode("utf-16")
+    for n in z.namelist():
+        if n.lower().endswith(".csv") and os.path.basename(n).startswith("jpcrp"):
+            return z.read(n).decode("utf-16")
+    return None
 
 
 def dei(rows, name):
@@ -191,49 +193,58 @@ def dei(rows, name):
 
 def normalize(text):
     rows = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
-
     end = dei(rows, "CurrentFiscalYearEndDateDEI")
     if len(end) < 7:
         return None, None
-    base_year = int(end[:4])
+    base = int(end[:4])
 
     meta = {
-        "edinet": dei(rows, "EDINETCodeDEI"),
         "sec": dei(rows, "SecurityCodeDEI")[:4],
+        "edinet": dei(rows, "EDINETCodeDEI"),
         "name": dei(rows, "FilerNameInJapaneseDEI"),
         "kijun": dei(rows, "AccountingStandardsDEI"),
         "renketsu": dei(rows, "WhetherConsolidatedFinancialStatementsArePreparedDEI"),
-        "kessanki": end[5:7] + "月期",
-        "kijun_hi": end,
+        "kessan": end[5:7] + "月期",
+        "kimatsu": end,
     }
-    is_consol = (meta["renketsu"] == "true")
+    scope = "連結" if meta["renketsu"] == "true" else "単体"
+    primary = "IFRS" if meta["kijun"] == "IFRS" else "JGAAP"
+    other = "JGAAP" if primary == "IFRS" else "IFRS"
 
     data = {}
-    picked_pattern = {}
+    mixed = []
 
-    for label, cons_pats, non_pats in ITEMS:
-        pats = cons_pats if is_consol else (non_pats or cons_pats)
-        want_non = not is_consol
-        for pat in pats:
-            found = {}
-            for r in rows:
-                if ("NonConsolidatedMember" in r["コンテキストID"]) != want_non:
-                    continue
-                if re.match(pat, r["要素ID"].split(":")[-1]) is None:
-                    continue
-                off = REL2OFFSET.get((r["相対年度"] or "").strip())
-                if off is None:
-                    continue
-                v = (r["値"] or "").strip()
-                if v in NULLS:
-                    continue
-                found[base_year - off] = v
-            if found:
-                data[label] = found
-                picked_pattern[label] = pat
-                break
+    for label, ifrs_pats, jgaap_pats in ITEMS:
+        series = {"IFRS": {}, "JGAAP": {}}
+        for tag, pats in (("IFRS", ifrs_pats), ("JGAAP", jgaap_pats)):
+            for pat in pats:
+                got = {}
+                for r in rows:
+                    off, sc = parse_ctx(r["コンテキストID"])
+                    if off is None or sc != scope:
+                        continue
+                    if re.match(pat, r["要素ID"].split(":")[-1]) is None:
+                        continue
+                    v = (r["値"] or "").strip()
+                    if v in NULLS:
+                        continue
+                    got[base - off] = v
+                if got:
+                    series[tag] = got
+                    break
 
-    meta["_patterns"] = picked_pattern
+        merged = {}
+        for y, v in series[other].items():
+            merged[y] = {"値": v, "基準": other}
+        for y, v in series[primary].items():
+            merged[y] = {"値": v, "基準": primary}
+
+        if merged:
+            data[label] = dict(sorted(merged.items()))
+            if len({d["基準"] for d in merged.values()}) > 1:
+                mixed.append(label)
+
+    meta["基準混在"] = mixed
     return meta, data
 
 
@@ -241,12 +252,11 @@ def main():
     if not API_KEY:
         log("EDINET_API_KEY が設定されていません。")
         sys.exit(1)
-
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    found, failed_days = collect_docs()
+    found, failed = collect_docs()
     if not found:
-        log("対象の有価証券報告書が1件も見つかりませんでした。期間を広げてください。")
+        log("有価証券報告書が見つかりませんでした。期間を広げてください。")
         sys.exit(1)
 
     all_rows = []
@@ -254,44 +264,59 @@ def main():
 
     for sec, doc in found.items():
         log("")
-        log(f"■ {sec} {doc.get('filerName')} の数値を取り出します")
+        log(f"■ {sec} {doc.get('filerName')}")
         text = download_csv(doc["docID"])
         if text is None:
             log("   CSVを取得できませんでした")
             continue
-
         with open(os.path.join(OUT_DIR, f"{sec}_{doc['docID']}.csv"), "w",
                   encoding="utf-8", newline="") as f:
             f.write(text)
 
         meta, data = normalize(text)
         if meta is None:
-            log("   中身を読めませんでした")
+            log("   読めませんでした")
             continue
 
-        log(f"   会計基準={meta['kijun']} 連結={meta['renketsu']} 決算={meta['kessanki']}")
+        log(f"   {meta['kijun']} / 連結={meta['renketsu']} / {meta['kessan']}"
+            + (f" / 基準混在: {meta['基準混在']}" if meta["基準混在"] else ""))
 
         years = sorted({y for v in data.values() for y in v})
         log("   " + " " * 12 + "".join(f"{y:>16}" for y in years))
         for label, _, _ in ITEMS:
             v = data.get(label)
             if not v:
-                log(f"   {label:<12}" + "（取得できず）")
+                log(f"   {label:<12}（なし）")
                 continue
-            log(f"   {label:<12}" + "".join(f"{v.get(y, '-'):>16}" for y in years))
+            cells = []
+            for y in years:
+                if y not in v:
+                    cells.append("-")
+                    continue
+                d = v[y]
+                mark = "*" if d["基準"] != ("IFRS" if meta["kijun"] == "IFRS" else "JGAAP") else ""
+                try:
+                    n = float(d["値"])
+                    s = f"{n / 1e8:,.0f}億" if abs(n) >= 1e8 else f"{n:g}"
+                except ValueError:
+                    s = d["値"][:12]
+                cells.append(s + mark)
+            log(f"   {label:<12}" + "".join(f"{c:>16}" for c in cells))
 
-        store[sec] = {"meta": meta, "data": data,
-                      "docID": doc["docID"], "submit": doc.get("submitDateTime")}
+        store[sec] = {"meta": meta, "data": data, "docID": doc["docID"],
+                      "submit": doc.get("submitDateTime")}
 
         for label, v in data.items():
-            for y, val in v.items():
+            for y, d in v.items():
                 all_rows.append({
                     "証券コード": sec, "会社名": meta["name"], "会計基準": meta["kijun"],
-                    "決算期": meta["kessanki"], "年度": y, "指標": label, "値": val,
+                    "決算期": meta["kessan"], "年度": y, "指標": label,
+                    "値": d["値"], "この値の基準": d["基準"],
                 })
 
     with open(os.path.join(OUT_DIR, "timeseries.csv"), "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["証券コード", "会社名", "会計基準", "決算期", "年度", "指標", "値"])
+        w = csv.DictWriter(f, fieldnames=["証券コード", "会社名", "会計基準", "決算期",
+                                          "年度", "指標", "値", "この値の基準"])
         w.writeheader()
         w.writerows(all_rows)
 
@@ -299,9 +324,9 @@ def main():
         json.dump(store, f, ensure_ascii=False, indent=1)
 
     log("")
-    log(f"■ 完了：{len(store)}社 / {len(all_rows)}行 を out/timeseries.csv に書き出しました")
-    if failed_days:
-        log(f"■ 取得できなかった日があります: {failed_days}")
+    log(f"■ 完了：{len(store)}社 / {len(all_rows)}行")
+    if failed:
+        log(f"■ 取得できなかった日があります: {failed}")
 
 
 if __name__ == "__main__":

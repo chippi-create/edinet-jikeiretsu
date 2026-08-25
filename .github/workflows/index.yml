@@ -1,0 +1,47 @@
+name: edinet-index
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日（YYYY-MM-DD）"
+        default: "2026-06-01"
+      end:
+        description: "終了日（YYYY-MM-DD）"
+        default: "2026-06-30"
+      max_days:
+        description: "1回で叩く日数の上限"
+        default: "260"
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: build index
+        run: python index.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+          MAX_DAYS: ${{ inputs.max_days }}
+
+      - name: commit index
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add docs_index.json
+          git diff --staged --quiet || git commit -m "index: ${{ inputs.start }} - ${{ inputs.end }}"
+          git push

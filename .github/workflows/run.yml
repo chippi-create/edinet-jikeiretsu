@@ -1,0 +1,41 @@
+name: edinet-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      sec_code:
+        description: "証券コード（4桁）"
+        default: "7203"
+      start:
+        description: "探し始める日（YYYY-MM-DD）"
+        default: "2026-06-15"
+      end:
+        description: "探し終わる日（YYYY-MM-DD）"
+        default: "2026-07-10"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: run
+        run: python fetch1.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          SEC_CODE: ${{ inputs.sec_code }}
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edinet-csv
+          path: out/
+          if-no-files-found: ignore

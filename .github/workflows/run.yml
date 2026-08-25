@@ -3,12 +3,12 @@ name: edinet-test
 on:
   workflow_dispatch:
     inputs:
-      sec_code:
-        description: "証券コード（4桁）"
-        default: "7203"
+      sec_codes:
+        description: "証券コード（カンマ区切り）"
+        default: "7203,7974,6758,9843,8306"
       start:
         description: "探し始める日（YYYY-MM-DD）"
-        default: "2026-06-15"
+        default: "2026-05-01"
       end:
         description: "探し終わる日（YYYY-MM-DD）"
         default: "2026-07-10"
@@ -29,7 +29,7 @@ jobs:
         run: python fetch1.py
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
-          SEC_CODE: ${{ inputs.sec_code }}
+          SEC_CODES: ${{ inputs.sec_codes }}
           START: ${{ inputs.start }}
           END: ${{ inputs.end }}
 

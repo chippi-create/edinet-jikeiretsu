@@ -1,7 +1,7 @@
 """
-EDINET 動作確認スクリプト（1社ぶん）
-指定した期間の書類一覧から、指定した証券コードの有価証券報告書を探し、
-XBRL→CSV（type=5）をダウンロードして中身を確認する。
+EDINET 動作確認スクリプト（診断モード付き）
+証券コードだけでなく社名でも照合し、書類種別を問わず候補を全部表示する。
+有価証券報告書が見つかればそのままCSVを取得して中身を出す。
 """
 
 import os
@@ -17,18 +17,14 @@ import requests
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 API_KEY = os.environ.get("EDINET_API_KEY", "")
 SEC_CODE = os.environ.get("SEC_CODE", "7203").strip()
+NAME_KEYWORD = os.environ.get("NAME_KEYWORD", "トヨタ自動車").strip()
 START = os.environ.get("START", "2026-06-15").strip()
 END = os.environ.get("END", "2026-07-10").strip()
 
-# EDINETは連続で叩くと切断されるので必ず間隔を空ける
 SLEEP = 4
-
 OUT_DIR = "out"
-
-# 有価証券報告書
 DOC_TYPE_YUHO = "120"
 
-# 画面に出したい項目のキーワード（項目名に含まれていたら表示）
 KEYWORDS = [
     "売上", "営業利益", "経常利益", "純利益", "純損失",
     "総資産", "純資産", "自己資本", "従業員", "平均年間給与",
@@ -48,9 +44,27 @@ def daterange(start_str, end_str):
         d += datetime.timedelta(days=1)
 
 
-def find_document():
-    """期間内の書類一覧を1日ずつ見て、対象企業の有報を探す"""
-    log(f"■ {SEC_CODE} の有価証券報告書を {START} 〜 {END} の範囲で探します")
+def is_candidate(doc):
+    """証券コードの先頭4桁が一致、または社名にキーワードを含むものを候補にする"""
+    sec = (doc.get("secCode") or "")
+    if SEC_CODE and sec[:4] == SEC_CODE:
+        return True
+    name = (doc.get("filerName") or "")
+    if NAME_KEYWORD and NAME_KEYWORD in name:
+        return True
+    return False
+
+
+def collect():
+    log(f"■ 診断モード")
+    log(f"   証券コード : {SEC_CODE!r}")
+    log(f"   社名キーワード : {NAME_KEYWORD!r}")
+    log(f"   期間 : {START} 〜 {END}")
+    log("")
+
+    candidates = []
+    printed_keys = False
+
     for d in daterange(START, END):
         try:
             r = requests.get(
@@ -66,37 +80,42 @@ def find_document():
         time.sleep(SLEEP)
 
         if r.status_code != 200:
-            log(f"  {d} HTTP {r.status_code} （キーが違う場合は401/403が出ます）")
+            log(f"  {d} HTTP {r.status_code}")
             continue
 
         results = r.json().get("results") or []
-        hit = None
-        for doc in results:
-            sec = (doc.get("secCode") or "")
-            if doc.get("docTypeCode") == DOC_TYPE_YUHO and sec[:4] == SEC_CODE:
-                hit = doc
-                break
 
-        if hit:
+        # 最初にデータが取れた日だけ、1件目の項目名を出して構造を確認する
+        if results and not printed_keys:
+            printed_keys = True
+            log("  【参考】1件目のデータ項目:")
+            log(f"    {list(results[0].keys())}")
+            log("  【参考】1件目の中身:")
+            for k in ("docID", "edinetCode", "secCode", "filerName",
+                      "docTypeCode", "docDescription", "ordinanceCode", "formCode"):
+                log(f"    {k} = {results[0].get(k)!r}")
             log("")
-            log("★ 見つかりました")
-            log(f"   docID      : {hit.get('docID')}")
-            log(f"   会社名     : {hit.get('filerName')}")
-            log(f"   EDINETコード: {hit.get('edinetCode')}")
-            log(f"   証券コード  : {hit.get('secCode')}")
-            log(f"   書類        : {hit.get('docDescription')}")
-            log(f"   対象期間    : {hit.get('periodStart')} 〜 {hit.get('periodEnd')}")
-            log("")
-            return hit
 
-        log(f"  {d} 提出書類{len(results)}件 / 該当なし")
+        n120 = sum(1 for doc in results if doc.get("docTypeCode") == DOC_TYPE_YUHO)
+        hits = [doc for doc in results if is_candidate(doc)]
 
-    return None
+        log(f"  {d} 全{len(results)}件 / 有報(120)は{n120}件 / 候補{len(hits)}件")
+
+        for doc in hits:
+            log("     -> docTypeCode={} secCode={!r} {} ｜ {}".format(
+                doc.get("docTypeCode"),
+                doc.get("secCode"),
+                doc.get("filerName"),
+                doc.get("docDescription"),
+            ))
+            candidates.append(doc)
+
+    return candidates
 
 
 def download_csv(doc_id):
-    """type=5（XBRLをCSVに変換したもの）をダウンロードして展開する"""
-    log("■ CSVをダウンロードします")
+    log("")
+    log(f"■ CSVをダウンロードします（docID={doc_id}）")
     r = requests.get(
         f"{BASE}/documents/{doc_id}",
         params={"type": 5, "Subscription-Key": API_KEY},
@@ -121,7 +140,6 @@ def download_csv(doc_id):
     for n in names:
         log(f"    - {n}")
 
-    # 本文＋財務諸表がまとまっているのは jpcrp で始まるファイル
     target = None
     for n in names:
         if os.path.basename(n).startswith("jpcrp"):
@@ -135,9 +153,7 @@ def download_csv(doc_id):
 
     log(f"  使うファイル: {target}")
 
-    raw = z.read(target)
-    # EDINETのCSVはUTF-16のタブ区切り
-    text = raw.decode("utf-16")
+    text = z.read(target).decode("utf-16")
 
     saved = os.path.join(OUT_DIR, f"{doc_id}.csv")
     with open(saved, "w", encoding="utf-8", newline="") as f:
@@ -158,7 +174,6 @@ def show(text):
     def col(row, name):
         return (row.get(name) or "").strip()
 
-    # 1. 主要な経営指標等の推移（1書類で5年分入っている）
     log("")
     log("■ 主要な経営指標等の推移（要素IDに SummaryOfBusinessResults を含む行）")
     summary = [r for r in rows if "SummaryOfBusinessResults" in col(r, "要素ID")]
@@ -172,15 +187,10 @@ def show(text):
             col(r, "要素ID"),
         ))
 
-    # 2. キーワードに引っかかる行（当期の数値の確認用）
     log("")
     log("■ キーワードに一致した行（先頭60件）")
-    hits = []
-    for r in rows:
-        name = col(r, "項目名")
-        if any(k in name for k in KEYWORDS):
-            hits.append(r)
-    log(f"   {len(hits)} 行（多いので先頭60件だけ表示します）")
+    hits = [r for r in rows if any(k in col(r, "項目名") for k in KEYWORDS)]
+    log(f"   {len(hits)} 行")
     for r in hits[:60]:
         log("   | {:<30} | {:<14} | {:<8} | {:>18} | {}".format(
             col(r, "項目名")[:30],
@@ -193,23 +203,33 @@ def show(text):
 
 def main():
     if not API_KEY:
-        log("EDINET_API_KEY が設定されていません。SecretにEDINET_API_KEYを登録してください。")
+        log("EDINET_API_KEY が設定されていません。")
         sys.exit(1)
 
-    doc = find_document()
-    if not doc:
-        log("")
-        log("該当する有価証券報告書が見つかりませんでした。")
-        log("期間（START / END）を広げるか、証券コードを確認してください。")
-        log("3月決算の会社は6月下旬に提出することが多いです。")
+    candidates = collect()
+
+    log("")
+    log(f"■ 候補は全部で {len(candidates)} 件でした")
+
+    if not candidates:
+        log("  この会社の書類が1件も見つかりませんでした。")
+        log("  社名キーワードを短く（例: トヨタ）して試してください。")
         sys.exit(1)
+
+    yuho = [d for d in candidates if d.get("docTypeCode") == DOC_TYPE_YUHO]
+    if not yuho:
+        log("  候補はありましたが、有価証券報告書(120)はありませんでした。")
+        log("  上の一覧の docTypeCode を見て、どれを対象にするか決めます。")
+        sys.exit(1)
+
+    doc = yuho[0]
+    log(f"  有価証券報告書を使います: {doc.get('docID')} {doc.get('filerName')}")
 
     text = download_csv(doc["docID"])
     if text is None:
         sys.exit(1)
 
     show(text)
-
     log("")
     log("■ 完了")
 

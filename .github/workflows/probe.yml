@@ -1,0 +1,24 @@
+name: probe
+
+# 抽出できなかった会社で、XBRLの実際の要素名を調べるための一時的なワークフロー。
+# 原因が分かったら消す。
+on:
+  workflow_dispatch:
+    inputs:
+      sec_codes:
+        description: "証券コード（カンマ区切り）"
+        default: "1950,1952,2408"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - run: python probe.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          SEC_CODES: ${{ inputs.sec_codes }}

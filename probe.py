@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""
+probe.py — 指標が取れなかった会社で、実際の要素名を調べる
+
+  SEC_CODES=1950,1952 python probe.py
+
+抽出パターンを推測で書くと外すので、XBRLに実在する要素IDを目で見るための道具。
+本番の取得には関わらない。
+"""
+
+import os
+import re
+import csv
+import io
+import json
+
+import fetch2
+
+# 見たい指標のあたり。ここに引っかかる要素IDを全部出す。
+KEYWORDS = os.environ.get(
+    "KEYWORDS",
+    "Revenue|NetSales|Sales|OperatingIncome|OrdinaryIncome|CompletedConstruction|Income",
+)
+
+
+def main():
+    codes = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
+    if not codes:
+        raise SystemExit("SEC_CODES を指定してください。")
+
+    with open(fetch2.INDEX_PATH, encoding="utf-8") as f:
+        index = json.load(f)
+    picked = fetch2.pick_docs(index, targets=codes)
+
+    pat = re.compile(KEYWORDS, re.I)
+
+    for sec, pair in picked.items():
+        doc = pair["本体"]
+        print("=" * 70)
+        print(f"■ {sec} {doc.get('filerName')}  docID={doc['docID']}")
+        text = fetch2.download_csv(doc["docID"])
+        if text is None:
+            print("  CSVを取得できませんでした")
+            continue
+        rows = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
+        print(f"  全{len(rows)}行")
+
+        seen = {}
+        for r in rows:
+            eid = r["要素ID"].split(":")[-1]
+            if not pat.search(eid):
+                continue
+            off, scope = fetch2.parse_ctx(r["コンテキストID"])
+            if off is None:
+                continue
+            v = (r["値"] or "").strip()
+            if v in fetch2.NULLS:
+                continue
+            seen.setdefault((eid, scope), []).append((off, v[:20]))
+
+        for (eid, scope), vals in sorted(seen.items()):
+            years = ",".join(f"-{o}" for o, _ in sorted(vals))
+            sample = sorted(vals)[0][1]
+            print(f"    {eid:<62} {scope}  年={years}  例={sample}")
+
+
+if __name__ == "__main__":
+    main()

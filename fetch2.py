@@ -49,10 +49,16 @@ ITEMS = [
      [r"^NetSalesSummaryOfBusinessResults$",
       r"^OrdinaryIncomeSummaryOfBusinessResults$",
       r"^OperatingRevenues?SummaryOfBusinessResults$",
-      r"^NetSalesJGAAPSummaryOfBusinessResults$"]),
+      r"^NetSalesJGAAPSummaryOfBusinessResults$",
+      # 主要な経営指標に載らない会社（バイオ等の事業収益など）は本表から補う。2年分。
+      r"^(NetSales|OperatingRevenues?|BusinessRevenue|Revenue)$"]),
     ("営業利益",
-     [r"^OperatingProfitLoss.*IFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
-     [r"^OperatingIncomeLossSummaryOfBusinessResults$"]),
+     [r"^OperatingProfitLoss.*IFRS(KeyFinancialData|SummaryOfBusinessResults)$",
+      r"^OperatingProfitLoss(IFRS)?$"],
+     [r"^OperatingIncomeLossSummaryOfBusinessResults$",
+      # 日本基準の主要な経営指標等の推移に営業利益の欄はないため、損益計算書本体から拾う。
+      # 本表は当期・前期しか載らないので、この指標だけ2年分になる。
+      r"^OperatingIncome(Loss)?$"]),
     ("経常利益", [], [r"^OrdinaryIncomeLossSummaryOfBusinessResults$"]),
     ("純利益",
      [r"^ProfitLossAttributableToOwnersOfParentIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],

@@ -1,0 +1,46 @@
+name: sections fetch
+
+# 所有者別状況・大株主の状況・役員の状況を集める。
+# 提出本文書(type=1)のZIPは大きいので、財務指標の取得より1回の社数を絞る。
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 毎日 05:00 JST（財務の取得と時間をずらす）
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "1回で処理する会社数"
+        default: "300"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: edinet-sections
+  cancel-in-progress: false
+
+jobs:
+  sections:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+
+      - name: fetch sections
+        run: python fetch_sections.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          LIMIT: ${{ inputs.limit || '300' }}
+
+      - name: commit
+        if: always()
+        run: |
+          git config user.name "edinet-bot"
+          git config user.email "edinet-bot@users.noreply.github.com"
+          git add data
+          git diff --staged --quiet || git commit -m "sections: $(date -u +%Y-%m-%d)"
+          git pull --rebase --autostash || true
+          git push

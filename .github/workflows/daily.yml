@@ -50,12 +50,15 @@ jobs:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           LIMIT: ${{ inputs.limit || '600' }}
 
+      - name: build site
+        run: python build_site.py
+
       - name: commit
         if: always()
         run: |
           git config user.name "edinet-bot"
           git config user.email "edinet-bot@users.noreply.github.com"
-          git add docs_index.json data
+          git add docs_index.json data site
           git diff --staged --quiet || git commit -m "edinet: $(date -u +%Y-%m-%d)"
           git pull --rebase --autostash || true
           git push

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>上場企業 財務時系列｜有価証券報告書から自動収集</title>
+<meta name="description" content="EDINETの有価証券報告書から、上場企業の売上高・利益・総資産などの推移を自動で集めて表示しています。">
+<script>window.__meta = {"companyCount": 5, "generated": "2026-09-04T15:10:02+09:00"};</script>
+<style>
+:root{
+  --ink:#1B2430; --mute:#6B7684; --rule:#E3E8EF; --paper:#F7F9FC;
+  --navy:#1F3352; --accent:#2F6DB5; --warn-bg:#FDECEA; --warn-ink:#8B1A10;
+}
+*{box-sizing:border-box}
+body{margin:0; color:var(--ink); background:#fff;
+  font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+  font-size:14px; line-height:1.6;}
+header{background:var(--navy); color:#fff; padding:16px}
+h1{margin:0; font-size:16px}
+.sub{margin:4px 0 0; font-size:11px; opacity:.82}
+.stale{background:var(--warn-bg); color:var(--warn-ink); padding:11px 16px;
+  font-size:12px; line-height:1.7; border-bottom:1px solid #F5C6C2}
+.wrap{max-width:900px; margin:0 auto; padding:0 16px}
+.controls{padding:14px 0; border-bottom:1px solid var(--rule)}
+input[type=search]{width:100%; padding:11px 12px; font-size:15px;
+  border:1px solid var(--rule); border-radius:8px}
+.count{padding:10px 0; font-size:12px; color:var(--mute)}
+.row{display:grid; grid-template-columns:64px 1fr auto; gap:10px; align-items:center;
+  padding:11px 4px; border-bottom:1px solid var(--rule); cursor:pointer; background:none;
+  border-left:0; border-right:0; border-top:0; text-align:left; font:inherit; color:inherit; width:100%}
+.row:hover{background:var(--paper)}
+.code{font-variant-numeric:tabular-nums; color:var(--accent); font-weight:600}
+.kessan{font-size:11px; color:var(--mute); white-space:nowrap}
+.more{display:block; width:100%; padding:12px; margin:12px 0 28px; font:inherit;
+  background:var(--paper); border:1px solid var(--rule); border-radius:8px; cursor:pointer}
+.detail{padding:16px 0 28px}
+.back{background:none; border:0; color:var(--accent); font:inherit; cursor:pointer; padding:0; margin-bottom:10px}
+.dname{font-size:17px; font-weight:700; margin:0}
+.dmeta{font-size:12px; color:var(--mute); margin:4px 0 14px}
+.tablewrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; min-width:520px; font-size:13px}
+th,td{padding:8px 10px; border-bottom:1px solid var(--rule); text-align:right;
+  font-variant-numeric:tabular-nums; white-space:nowrap}
+th:first-child,td:first-child{text-align:left; font-variant-numeric:normal}
+thead th{background:var(--paper); font-size:12px; color:var(--mute)}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--paper)}
+tbody tr.on{background:#EAF2FB}
+.corr{color:#B4531A; font-size:10px; margin-left:2px}
+.chart{margin:18px 0 8px}
+.chart h3{font-size:13px; margin:0 0 6px; font-weight:600}
+.empty{padding:44px 8px; text-align:center; color:var(--mute)}
+.notice{padding:18px 16px 44px; font-size:11px; line-height:1.9; color:var(--mute);
+  border-top:1px solid var(--rule); background:var(--paper); margin-top:24px}
+.notice strong{color:var(--ink)}
+</style>
+</head>
+<body>
+<header>
+  <h1>上場企業 財務時系列</h1>
+  <p class="sub" id="asof"></p>
+</header>
+
+<div class="wrap">
+  <div id="listView">
+    <div class="controls">
+      <input type="search" id="q" placeholder="証券コード または 会社名でさがす">
+    </div>
+    <div class="count" id="count"></div>
+    <div id="list"></div>
+    <button class="more" id="more" style="display:none">もっと見る</button>
+  </div>
+  <div id="detailView" class="detail" hidden></div>
+</div>
+
+<footer class="notice">
+  <strong>出典：金融庁 EDINET</strong>（https://disclosure2dl.edinet-fsa.go.jp/）<br>
+  本サイトは上記データを加工して作成したものであり、金融庁が作成したものではありません。<br>
+  有価証券報告書の「主要な経営指標等の推移」および財務諸表から機械的に抽出しています。<br>
+  日本基準では主要な経営指標等の推移に営業利益の欄がないため、営業利益は損益計算書から補っています。
+  この場合は当期・前期の2年分のみとなります。売上高も科目名が異なる会社は同様です。<br>
+  訂正有価証券報告書が提出されている値には「訂」と表示しています。<br>
+  <strong>本サイトは財務データを表示するものであり、投資の勧誘・助言を行うものではありません。</strong>
+  投資判断はご自身の責任でお願いします。抽出誤りの可能性があるため、
+  実際の数値は必ず各社の有価証券報告書の原本をご確認ください。
+</footer>
+
+<script>
+const IDX = [["1301","株式会社極洋","03月期","Japan GAAP"],["130A","株式会社Ｖｅｒｉｔａｓ　Ｉｎ　Ｓｉｌｉｃｏ","12月期","Japan GAAP"],["1332","株式会社ニッスイ","03月期","Japan GAAP"],["1333","Umios株式会社","03月期","Japan GAAP"],["135A","株式会社ＶＲＡＩＮ　Ｓｏｌｕｔｉｏｎ","02月期","Japan GAAP"]];
+const UNITS = {"売上高": "億", "営業利益": "億", "経常利益": "億", "純利益": "億", "総資産": "億", "純資産": "億", "営業CF": "億", "自己資本比率": "%", "ROE": "%", "EPS": "円", "従業員数": "人"};
+const ORDER = ["売上高", "営業利益", "経常利益", "純利益", "営業CF", "総資産", "純資産", "自己資本比率", "ROE", "EPS", "従業員数"];
+const NOTE2Y = ["営業利益", "売上高"];
+const GENERATED = "2026-09-04T15:10:02+09:00";
+
+const today = new Date(); today.setHours(0,0,0,0);
+const GEN = new Date(GENERATED);
+const genDay = new Date(GEN.getFullYear(), GEN.getMonth(), GEN.getDate());
+const ageDays = Math.round((today - genDay) / 86400000);
+
+document.getElementById('asof').textContent =
+  GEN.getFullYear() + '年' + (GEN.getMonth()+1) + '月' + GEN.getDate() + '日更新 ／ '
+  + IDX.length.toLocaleString() + '社';
+
+// 毎日取得しているので、4日以上あいていたら自動更新が止まっている疑いがある。
+if (ageDays >= 4) {
+  const bar = document.createElement('div');
+  bar.className = 'stale';
+  bar.textContent = 'データの更新が' + ageDays + '日間止まっています。'
+    + '最新の内容とは異なる可能性があるため、各社の有価証券報告書をご確認ください。';
+  document.body.prepend(bar);
+}
+
+function fmt(metric, raw){
+  const u = UNITS[metric] || '';
+  const n = Number(raw);
+  if (!isFinite(n)) return raw;
+  if (u === '億') return (n/1e8).toLocaleString(undefined, {maximumFractionDigits:1}) + '億';
+  if (u === '%')  return (n*100).toFixed(1) + '%';
+  if (u === '円') return n.toLocaleString(undefined, {maximumFractionDigits:2}) + '円';
+  if (u === '人') return n.toLocaleString() + '人';
+  return String(raw);
+}
+
+let shown = IDX, drawn = 0;
+const CHUNK = 50;
+
+function paint(reset){
+  const list = document.getElementById('list');
+  if (reset){ list.innerHTML = ''; drawn = 0; }
+  const slice = shown.slice(drawn, drawn + CHUNK);
+  const frag = document.createDocumentFragment();
+  for (const rec of slice){
+    const b = document.createElement('button');
+    b.className = 'row';
+    const c = document.createElement('span'); c.className = 'code'; c.textContent = rec[0];
+    const n = document.createElement('span'); n.textContent = rec[1];
+    const k = document.createElement('span'); k.className = 'kessan'; k.textContent = rec[2];
+    b.append(c, n, k);
+    b.onclick = () => openCompany(rec[0]);
+    frag.appendChild(b);
+  }
+  list.appendChild(frag);
+  drawn += slice.length;
+  document.getElementById('more').style.display = drawn < shown.length ? '' : 'none';
+  document.getElementById('count').textContent = shown.length.toLocaleString() + '社';
+  if (!shown.length) list.innerHTML = '<div class="empty">見つかりませんでした</div>';
+}
+
+document.getElementById('more').onclick = () => paint(false);
+document.getElementById('q').addEventListener('input', function(e){
+  const q = e.target.value.trim().toLowerCase();
+  shown = !q ? IDX : IDX.filter(r =>
+    r[0].toLowerCase().includes(q) || r[1].toLowerCase().includes(q));
+  paint(true);
+});
+
+const cache = {};
+function loadBucket(code){
+  const b = code.slice(0, 2);
+  if (!cache[b]) cache[b] = fetch('d/' + b + '.json').then(r => r.json());
+  return cache[b];
+}
+
+function lineChart(metric, years, vals){
+  const W = 640, H = 180, P = 34;
+  const nums = vals.map(Number).filter(isFinite);
+  if (nums.length < 2) return '';
+  const lo = Math.min.apply(null, nums.concat([0]));
+  let hi = Math.max.apply(null, nums.concat([0]));
+  if (hi === lo) hi = lo + 1;
+  const x = i => P + i * (W - P*2) / Math.max(1, years.length - 1);
+  const y = v => H - P - (v - lo) * (H - P*2) / (hi - lo);
+  const pts = [];
+  let dots = '', labels = '';
+  years.forEach(function(yr, i){
+    const v = Number(vals[i]);
+    if (isFinite(v) && vals[i] !== undefined){
+      pts.push(x(i) + ',' + y(v));
+      dots += '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="3" fill="#2F6DB5"></circle>';
+    }
+    labels += '<text x="' + x(i) + '" y="' + (H-10) + '" font-size="11" fill="#6B7684" '
+           + 'text-anchor="middle">' + yr + '</text>';
+  });
+  const zero = (lo < 0 && hi > 0)
+    ? '<line x1="' + P + '" y1="' + y(0) + '" x2="' + (W-P) + '" y2="' + y(0)
+      + '" stroke="#C9D2DE" stroke-dasharray="3 3"></line>'
+    : '';
+  return '<div class="chart"><h3>' + metric + 'の推移</h3>'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="'
+    + metric + 'の推移">' + zero
+    + '<polyline fill="none" stroke="#2F6DB5" stroke-width="2" points="' + pts.join(' ')
+    + '"></polyline>' + dots + labels + '</svg></div>';
+}
+
+let current = null, currentMetric = null;
+
+function openCompany(code){
+  loadBucket(code).then(function(bucket){
+    const c = bucket[code];
+    if (!c) return;
+    current = {code: code, c: c};
+    const metrics = ORDER.filter(m => c.d[m]);
+    currentMetric = metrics.indexOf('売上高') >= 0 ? '売上高' : metrics[0];
+    render();
+    document.getElementById('listView').hidden = true;
+    document.getElementById('detailView').hidden = false;
+    window.scrollTo(0, 0);
+  });
+}
+
+function render(){
+  const code = current.code, c = current.c;
+  const metrics = ORDER.filter(m => c.d[m]);
+  const years = Array.from(new Set([].concat.apply([],
+    metrics.map(m => Object.keys(c.d[m]))))).sort();
+
+  const head = '<tr><th>指標</th>' + years.map(y => '<th>' + y + '</th>').join('') + '</tr>';
+  let body = '';
+  metrics.forEach(function(m){
+    const corr = (c.c && c.c[m]) || [];
+    let tds = '';
+    years.forEach(function(y){
+      const v = c.d[m][y];
+      tds += '<td>' + (v === undefined ? '—'
+        : fmt(m, v) + (corr.indexOf(y) >= 0 ? '<span class="corr">訂</span>' : '')) + '</td>';
+    });
+    const note = (NOTE2Y.indexOf(m) >= 0 && Object.keys(c.d[m]).length < years.length) ? ' ※' : '';
+    body += '<tr data-m="' + m + '" class="' + (m === currentMetric ? 'on' : '') + '">'
+         + '<td>' + m + note + '</td>' + tds + '</tr>';
+  });
+
+  const vals = years.map(y => c.d[currentMetric] ? c.d[currentMetric][y] : undefined);
+
+  document.getElementById('detailView').innerHTML =
+      '<button class="back" id="back">← 一覧にもどる</button>'
+    + '<p class="dname"></p>'
+    + '<p class="dmeta"></p>'
+    + lineChart(currentMetric, years, vals)
+    + '<div class="tablewrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>'
+    + '<p class="dmeta" style="margin-top:12px">'
+    + '行をタップするとグラフが切り替わります。「※」は制度上2年分しか取得できない指標です。</p>';
+
+  document.querySelector('#detailView .dname').textContent = c.n;
+  document.querySelector('#detailView .dmeta').textContent = code + '／' + c.e + '／' + c.k;
+
+  document.getElementById('back').onclick = function(){
+    document.getElementById('detailView').hidden = true;
+    document.getElementById('listView').hidden = false;
+  };
+  document.querySelectorAll('#detailView tbody tr').forEach(function(tr){
+    tr.onclick = function(){ currentMetric = tr.dataset.m; render(); };
+  });
+}
+
+paint(true);
+</script>
+</body>
+</html>

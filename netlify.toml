@@ -1,0 +1,4 @@
+# サイトは build_site.py が生成してリポジトリにコミット済みなので、
+# Netlify側でのビルドは行わない。site/ をそのまま配信する。
+[build]
+  publish = "site"

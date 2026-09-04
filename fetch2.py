@@ -48,7 +48,10 @@ ITEMS = [
      [r"^(?!.*Cost).*(Revenue|Revenues|NetSales).*IFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
      [r"^NetSalesSummaryOfBusinessResults$",
       r"^OrdinaryIncomeSummaryOfBusinessResults$",
-      r"^OperatingRevenues?SummaryOfBusinessResults$",
+      # 営業収益。不動産・サービス業などで使われ、末尾に1が付く形がある。
+      r"^OperatingRevenues?[0-9]?SummaryOfBusinessResults$",
+      # 収益認識基準を適用した会社の「売上収益」。
+      r"^RevenueSummaryOfBusinessResults$",
       r"^NetSalesJGAAPSummaryOfBusinessResults$",
       # 建設業は「完成工事高」。主要な経営指標等の推移に5年分載っている。
       r"^NetSalesOfCompletedConstructionContractsSummaryOfBusinessResults$",

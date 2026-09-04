@@ -8,7 +8,10 @@ on:
     inputs:
       sec_codes:
         description: "証券コード（カンマ区切り）"
-        default: "1950,1952,2408"
+        default: "1332"
+      keywords:
+        description: "要素IDにかける正規表現"
+        default: "Shareholder|Owner|Director|Officer|CorporateAuditor"
 
 jobs:
   probe:
@@ -23,3 +26,4 @@ jobs:
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           SEC_CODES: ${{ inputs.sec_codes }}
+          KEYWORDS: ${{ inputs.keywords }}

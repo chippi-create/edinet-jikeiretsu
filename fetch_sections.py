@@ -115,14 +115,19 @@ def parse_shareholders(tabs):
     for t in tabs:
         if not t:
             continue
-        head = " ".join(t[0])
-        if "氏名又は名称" not in head or "所有株式数" not in head:
+        # 見出しが1行目とは限らない。「2026年３月31日現在」だけの行が上に付く
+        # 会社があり、1行目で決め打ちすると表ごと取りこぼす。
+        h = -1
+        for i, row in enumerate(t[:4]):
+            joined = " ".join(row)
+            if "氏名又は名称" in joined and "所有株式数" in joined and "保有株券等" not in joined:
+                h = i
+                break
+        if h < 0:
             continue
-        if "保有株券等" in head:      # 大量保有報告書ベースの参考表
-            continue
-        unit = unit_of(t[0][2] if len(t[0]) > 2 else "")
+        unit = unit_of(t[h][2] if len(t[h]) > 2 else "")
         out, rank = [], 0
-        for row in t[1:]:
+        for row in t[h + 1:]:
             if len(row) < 4:
                 continue
             name = row[0].strip()

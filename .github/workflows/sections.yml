@@ -1,0 +1,27 @@
+name: sections probe
+
+# 記述部分（所有者別状況・大株主・役員）の表がどう取れるかを目で見るための実行。
+on:
+  workflow_dispatch:
+    inputs:
+      sec_codes:
+        description: "証券コード（カンマ区切り）"
+        default: "1332"
+      rows:
+        description: "各表を何行まで表示するか"
+        default: "8"
+
+jobs:
+  sections:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - run: python sections.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          SEC_CODES: ${{ inputs.sec_codes }}
+          ROWS: ${{ inputs.rows }}

@@ -50,6 +50,8 @@ ITEMS = [
       r"^OrdinaryIncomeSummaryOfBusinessResults$",
       r"^OperatingRevenues?SummaryOfBusinessResults$",
       r"^NetSalesJGAAPSummaryOfBusinessResults$",
+      # 建設業は「完成工事高」。主要な経営指標等の推移に5年分載っている。
+      r"^NetSalesOfCompletedConstructionContractsSummaryOfBusinessResults$",
       # 主要な経営指標に載らない会社（バイオ等の事業収益など）は本表から補う。2年分。
       r"^(NetSales|OperatingRevenues?|BusinessRevenue|Revenue)$"]),
     ("営業利益",

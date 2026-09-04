@@ -13,6 +13,7 @@ fetch2.py と同じく、索引の書類構成が変わった会社だけを取�
 
 import os
 import csv
+import re
 import sys
 import json
 import time
@@ -29,8 +30,8 @@ SHAREHOLDERS = os.path.join(DATA_DIR, "shareholders.csv")
 OFFICERS = os.path.join(DATA_DIR, "officers.csv")
 
 F_OWN = ["証券コード", "会社名", "基準日", "区分", "株主数", "所有株式数_単元", "割合"]
-F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数_千株", "割合"]
-F_OF = ["証券コード", "会社名", "基準日", "役職名", "氏名", "生年月日", "任期", "所有株式数_千株"]
+F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]
+F_OF = ["証券コード", "会社名", "基準日", "役職名", "氏名", "生年月日", "任期", "所有株式数", "単位"]
 
 # 略歴はCSVに入れない。1人あたり数百字あり、3,800社ぶんでは巨大になって
 # 毎日の書き換えでGit履歴が膨らむため。必要になったら別ファイルにする。
@@ -42,6 +43,15 @@ def log(*a):
 
 def clean(s):
     return (s or "").replace(" ", "").replace("―", "").replace("－", "").strip()
+
+
+def unit_of(text):
+    """見出しから単位を読む。会社によって千株だったり株だったりする。
+
+    決め打ちにすると桁が1000倍ずれる。極洋の役員欄は「株」、大株主欄は「千株」だった。
+    """
+    m = re.search(r"[（(]\s*(千株|百株|株)\s*[)）]", text or "")
+    return m.group(1) if m else ""
 
 
 def num(s):
@@ -107,6 +117,7 @@ def parse_shareholders(tabs):
             continue
         if "保有株券等" in head:      # 大量保有報告書ベースの参考表
             continue
+        unit = unit_of(t[0][2] if len(t[0]) > 2 else "")
         out, rank = [], 0
         for row in t[1:]:
             if len(row) < 4:
@@ -116,7 +127,7 @@ def parse_shareholders(tabs):
                 continue
             rank += 1
             out.append({"順位": rank, "氏名又は名称": name, "住所": row[1].strip(),
-                        "所有株式数_千株": num(row[2]), "割合": num(row[3])})
+                        "所有株式数": num(row[2]), "単位": unit, "割合": num(row[3])})
         if out:
             return out
     return []
@@ -139,6 +150,7 @@ def parse_officers(tabs):
                     idx[key] = j
         if "氏名" not in idx:
             continue
+        unit = unit_of(head[idx["所有株式数"]] if "所有株式数" in idx else "")
         for row in t[1:]:
             get = lambda k: row[idx[k]].strip() if k in idx and idx[k] < len(row) else ""
             name = get("氏名")
@@ -146,7 +158,7 @@ def parse_officers(tabs):
                 continue
             out.append({"役職名": get("役職名"), "氏名": name,
                         "生年月日": get("生年月日"), "任期": get("任期"),
-                        "所有株式数_千株": num(get("所有株式数"))})
+                        "所有株式数": num(get("所有株式数")), "単位": unit})
     return out
 
 

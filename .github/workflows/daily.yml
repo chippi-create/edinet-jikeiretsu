@@ -1,0 +1,68 @@
+name: edinet daily
+
+# 索引を最新にしてから、まだ取っていない会社を LIMIT 社ぶん取得する。
+# 一度に全社は取らない（EDINETに短時間で大量アクセスしないため）。
+# 3,768社なので、600社ずつで7日かけて一巡する。以降は新しい有報が出た会社だけが対象になる。
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 毎日 07:00 JST
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "1回で処理する会社数"
+        default: "600"
+
+permissions:
+  contents: write
+
+# 前の実行が終わる前に次が始まると、docs_index.json の取り合いになる
+concurrency:
+  group: edinet-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      # 直近30日ぶんだけ見る。取得済みの日は index.py 側で自動的に飛ばされる。
+      - name: update index
+        run: |
+          export START=$(date -u -d '30 days ago' +%Y-%m-%d)
+          export END=$(date -u +%Y-%m-%d)
+          echo "索引の更新範囲: $START 〜 $END"
+          python index.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          MAX_DAYS: "30"
+
+      - name: fetch companies
+        run: python fetch2.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          LIMIT: ${{ inputs.limit || '600' }}
+
+      - name: commit
+        if: always()
+        run: |
+          git config user.name "edinet-bot"
+          git config user.email "edinet-bot@users.noreply.github.com"
+          git add docs_index.json data
+          git diff --staged --quiet || git commit -m "edinet: $(date -u +%Y-%m-%d)"
+          git pull --rebase --autostash || true
+          git push
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edinet-data
+          path: data/
+          if-no-files-found: ignore

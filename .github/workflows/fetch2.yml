@@ -7,8 +7,8 @@ on:
         description: "証券コード（カンマ区切り／空なら訂正のある会社を自動選択）"
         default: ""
       auto_pick:
-        description: "自動選択するときの社数"
-        default: "5"
+        description: "試し取りする社数（0＝索引にある全社を順に処理）"
+        default: "0"
 
 jobs:
   fetch:

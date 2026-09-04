@@ -18,12 +18,22 @@ import requests
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 API_KEY = os.environ.get("EDINET_API_KEY", "")
 SEC_CODES = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
-AUTO_PICK = int(os.environ.get("AUTO_PICK", "5"))
+# 0 なら索引にある全社が対象。数字を入れるとその社数だけ試しに取る。
+AUTO_PICK = int(os.environ.get("AUTO_PICK", "0") or "0")
 
 SLEEP = 4
 RETRY = 3
 INDEX_PATH = "docs_index.json"
 OUT_DIR = "out"
+
+# 取得結果はリポジトリに貯める。out/ はActionsのアーティファクト用（90日で消える）。
+DATA_DIR = "data"
+TS_PATH = os.path.join(DATA_DIR, "timeseries.csv")
+STATE_PATH = os.path.join(DATA_DIR, "fetch_state.json")
+# 1回の実行で処理する会社数の上限。EDINETに短時間で大量アクセスしないための歯止め。
+LIMIT = int(os.environ.get("LIMIT", "600"))
+FIELDNAMES = ["証券コード", "会社名", "会計基準", "決算期", "年度",
+              "指標", "値", "この値の基準", "出所書類", "本体か訂正か"]
 
 CTX_HEAD = {
     "CurrentYearDuration": 0, "CurrentYearInstant": 0,
@@ -182,7 +192,51 @@ def normalize(text):
     return meta, data
 
 
-def pick_docs(index):
+def load_state():
+    """どの会社をどの書類で取得済みかの記録。CSVと対で使う。"""
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def load_rows():
+    """蓄積済みのCSVを会社ごとに読み込む。"""
+    rows = {}
+    if not os.path.exists(TS_PATH):
+        return rows
+    with open(TS_PATH, encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            rows.setdefault(r["証券コード"], []).append(r)
+    return rows
+
+
+def save_all(rows, state):
+    """会社コード順・指標順に並べて書き出す。並びを固定しないとGitの差分が毎回全行になる。"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    flat = []
+    for sec in sorted(rows):
+        flat.extend(sorted(rows[sec], key=lambda r: (r["指標"], r["年度"])))
+    with open(TS_PATH, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        w.writeheader()
+        w.writerows(flat)
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=1, sort_keys=True)
+    return len(flat)
+
+
+def needs_update(sec, pair, state):
+    """索引の書類構成が記録と違えば取り直す。新しい有報や訂正が出た会社だけが対象になる。"""
+    got = state.get(sec)
+    if not got:
+        return True
+    if got.get("本体") != pair["本体"]["docID"]:
+        return True
+    return got.get("訂正候補", []) != [t["docID"] for t in pair["訂正"]]
+
+
+def pick_docs(index, targets=None, quiet=False):
     docs = index["docs"]
     by_sec = {}
     for d in docs.values():
@@ -190,24 +244,29 @@ def pick_docs(index):
         if sec:
             by_sec.setdefault(sec, []).append(d)
 
-    targets = SEC_CODES
-    if not targets:
-        cand = [s for s, v in by_sec.items()
-                if any(x.get("docTypeCode") == "130" for x in v)
-                and any(x.get("docTypeCode") == "120" for x in v)]
-        targets = sorted(cand)[:AUTO_PICK]
-        log(f"■ 訂正のある会社を自動選択: {targets}（該当 {len(cand)}社）")
+    if targets is None:
+        targets = SEC_CODES
+        if not targets and AUTO_PICK:
+            cand = [s for s, v in by_sec.items()
+                    if any(x.get("docTypeCode") == "130" for x in v)
+                    and any(x.get("docTypeCode") == "120" for x in v)]
+            targets = sorted(cand)[:AUTO_PICK]
+            log(f"■ 訂正のある会社を自動選択: {targets}（該当 {len(cand)}社）")
+        elif not targets:
+            targets = sorted(by_sec)
 
     out = {}
     for sec in targets:
         lst = by_sec.get(sec)
         if not lst:
-            log(f"  {sec}: 索引にありません")
+            if not quiet:
+                log(f"  {sec}: 索引にありません")
             continue
         honbun = sorted([d for d in lst if d.get("docTypeCode") == "120"],
                         key=lambda x: x.get("submitDateTime") or "")
         if not honbun:
-            log(f"  {sec}: 有価証券報告書(120)が索引にありません")
+            if not quiet:
+                log(f"  {sec}: 有価証券報告書(120)が索引にありません")
             continue
         main = honbun[-1]
         main_dt = main.get("submitDateTime") or ""
@@ -245,13 +304,27 @@ def main():
         index = json.load(f)
     log(f"■ 索引: {len(index['docs'])}件 / {len(index['days'])}日ぶん")
 
-    picked = pick_docs(index)
+    state = load_state()
+    rows = load_rows()
+    log(f"■ 蓄積の現状: {len(rows)}社 / {sum(len(v) for v in rows.values())}行")
+
+    picked = pick_docs(index, quiet=True)
     if not picked:
         log("対象がありません。")
         sys.exit(1)
 
-    all_rows = []
-    store = {}
+    pending = [sec for sec in sorted(picked) if needs_update(sec, picked[sec], state)]
+    log(f"■ 索引にある会社 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
+    if not pending:
+        log("■ すべて最新です。取得するものはありません。")
+        return
+    picked = {sec: picked[sec] for sec in pending[:LIMIT]}
+    log(f"■ 今回の対象: {len(picked)}社（1回の上限 {LIMIT}社。残りは次回の実行で）")
+    est = len(picked) * SLEEP * 2 / 60
+    log(f"■ 見込み時間: 約{est:.0f}分")
+
+    done = 0
+    failed = []
 
     for sec, pair in picked.items():
         main = pair["本体"]
@@ -269,10 +342,12 @@ def main():
         text = download_csv(main["docID"])
         if text is None:
             log("   本体のCSVを取得できませんでした")
+            failed.append(sec)
             continue
         meta, data = normalize(text)
         if meta is None:
             log("   本体を読めませんでした")
+            failed.append(sec)
             continue
 
         merged = {}
@@ -339,26 +414,36 @@ def main():
                 cells.append(s + mark)
             log(f"   {label:<12}" + "".join(f"{c:>16}" for c in cells))
 
-        store[sec] = {"meta": meta, "data": merged,
-                      "本体": main["docID"], "適用した訂正": applied}
-        for label, v in merged.items():
-            for y, d in v.items():
-                all_rows.append({
-                    "証券コード": sec, "会社名": meta["name"], "会計基準": meta["kijun"],
-                    "決算期": meta["kessan"], "年度": y, "指標": label, "値": d["値"],
-                    "この値の基準": d["基準"], "出所書類": d["出所"], "本体か訂正か": d["種別"],
-                })
+        # その会社ぶんを丸ごと差し替える（訂正で値が変わることがあるため追記はしない）
+        rows[sec] = [{
+            "証券コード": sec, "会社名": meta["name"], "会計基準": meta["kijun"],
+            "決算期": meta["kessan"], "年度": y, "指標": label, "値": d["値"],
+            "この値の基準": d["基準"], "出所書類": d["出所"], "本体か訂正か": d["種別"],
+        } for label, v in merged.items() for y, d in v.items()]
+        state[sec] = {
+            "会社名": meta["name"],
+            "本体": main["docID"],
+            "訂正候補": [t["docID"] for t in pair["訂正"]],
+            "適用した訂正": applied,
+            "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00", time.gmtime(time.time() + 9 * 3600)),
+        }
+        done += 1
 
-    with open(os.path.join(OUT_DIR, "timeseries.csv"), "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["証券コード", "会社名", "会計基準", "決算期", "年度",
-                                          "指標", "値", "この値の基準", "出所書類", "本体か訂正か"])
-        w.writeheader()
-        w.writerows(all_rows)
-    with open(os.path.join(OUT_DIR, "store.json"), "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=1)
+        # 途中で落ちても取得ぶんを失わないよう、こまめに書き出す
+        if done % 50 == 0:
+            save_all(rows, state)
+            log(f"   （途中保存：{done}社ぶん）")
+
+    total = save_all(rows, state)
 
     log("")
-    log(f"■ 完了：{len(store)}社 / {len(all_rows)}行")
+    log(f"■ 今回の取得：{done}社")
+    log(f"■ 蓄積の合計：{len(rows)}社 / {total}行")
+    remain = len(pending) - done
+    if remain > 0:
+        log(f"■ 残り {remain}社。次回の実行で続きから取得します。")
+    if failed:
+        log(f"■ 取得できなかった会社: {failed}")
 
 
 if __name__ == "__main__":

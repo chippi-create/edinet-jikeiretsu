@@ -41,7 +41,13 @@ input[type=search]{width:100%; padding:11px 12px; font-size:15px;
 table{border-collapse:collapse; width:100%; min-width:520px; font-size:13px}
 th,td{padding:8px 10px; border-bottom:1px solid var(--rule); text-align:right;
   font-variant-numeric:tabular-nums; white-space:nowrap}
-th:first-child,td:first-child{text-align:left; font-variant-numeric:normal}
+th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
+.tabbar{display:flex; gap:6px; margin:4px 0 14px; border-bottom:1px solid var(--rule)}
+.tab{font:inherit; background:none; border:0; border-bottom:2px solid transparent;
+  padding:8px 12px; cursor:pointer; color:var(--mute)}
+.tab.on{color:var(--accent); border-bottom-color:var(--accent); font-weight:600}
+.tab:disabled{color:#C2CAD6; cursor:default}
+.sech{font-size:13px; margin:18px 0 6px; font-weight:600}
 thead th{background:var(--paper); font-size:12px; color:var(--mute)}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--paper)}
@@ -90,7 +96,13 @@ const IDX = __INDEX__;
 const UNITS = __UNITS__;
 const ORDER = __ORDER__;
 const NOTE2Y = __NOTE2Y__;
+const SECBUCKETS = __SECBUCKETS__;
 const GENERATED = "__GENERATED__";
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 const today = new Date(); today.setHours(0,0,0,0);
 const GEN = new Date(GENERATED);
@@ -192,29 +204,77 @@ function lineChart(metric, years, vals){
     + '"></polyline>' + dots + labels + '</svg></div>';
 }
 
-let current = null, currentMetric = null;
+let current = null, currentMetric = null, currentTab = '財務';
+
+const scache = {};
+function loadSections(code){
+  const b = code.slice(0, 2);
+  if (SECBUCKETS.indexOf(b) < 0) return Promise.resolve(null);
+  if (!scache[b]) scache[b] = fetch('s/' + b + '.json').then(r => r.json()).catch(() => null);
+  return scache[b];
+}
 
 function openCompany(code){
   loadBucket(code).then(function(bucket){
     const c = bucket[code];
     if (!c) return;
-    current = {code: code, c: c};
+    current = {code: code, c: c, s: undefined};
     const metrics = ORDER.filter(m => c.d[m]);
     currentMetric = metrics.indexOf('売上高') >= 0 ? '売上高' : metrics[0];
+    currentTab = '財務';
     render();
     document.getElementById('listView').hidden = true;
     document.getElementById('detailView').hidden = false;
     window.scrollTo(0, 0);
+    // 記述部分は開いた時点で先読みしておく。タブを押してから待たせない。
+    loadSections(code).then(function(all){
+      current.s = (all && all[code]) || null;
+      if (current.code === code) renderTabs();
+    });
   });
 }
 
-function render(){
-  const code = current.code, c = current.c;
+const TABS = [
+  ['財務', null],
+  ['株主', 'sh'],
+  ['役員', 'of'],
+];
+
+function renderTabs(){
+  const bar = document.getElementById('tabbar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  TABS.forEach(function(t){
+    const name = t[0], key = t[1];
+    const has = key === null || (current.s && current.s[key] && current.s[key].length);
+    const b = document.createElement('button');
+    b.className = 'tab' + (name === currentTab ? ' on' : '');
+    b.textContent = name;
+    b.disabled = !has;
+    b.onclick = function(){ currentTab = name; render(); };
+    bar.appendChild(b);
+  });
+}
+
+function table(headers, rows, align){
+  let h = '<tr>' + headers.map(function(x, i){
+    return '<th' + (align && align[i] === 'l' ? ' class="l"' : '') + '>' + esc(x) + '</th>';
+  }).join('') + '</tr>';
+  let b = rows.map(function(r){
+    return '<tr>' + r.map(function(x, i){
+      return '<td' + (align && align[i] === 'l' ? ' class="l"' : '') + '>' + esc(x || '—') + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  return '<div class="tablewrap"><table><thead>' + h + '</thead><tbody>' + b + '</tbody></table></div>';
+}
+
+function financeBody(){
+  const c = current.c;
   const metrics = ORDER.filter(m => c.d[m]);
   const years = Array.from(new Set([].concat.apply([],
     metrics.map(m => Object.keys(c.d[m]))))).sort();
 
-  const head = '<tr><th>指標</th>' + years.map(y => '<th>' + y + '</th>').join('') + '</tr>';
+  const head = '<tr><th class="l">指標</th>' + years.map(y => '<th>' + y + '</th>').join('') + '</tr>';
   let body = '';
   metrics.forEach(function(m){
     const corr = (c.c && c.c[m]) || [];
@@ -222,34 +282,78 @@ function render(){
     years.forEach(function(y){
       const v = c.d[m][y];
       tds += '<td>' + (v === undefined ? '—'
-        : fmt(m, v) + (corr.indexOf(y) >= 0 ? '<span class="corr">訂</span>' : '')) + '</td>';
+        : esc(fmt(m, v)) + (corr.indexOf(y) >= 0 ? '<span class="corr">訂</span>' : '')) + '</td>';
     });
     const note = (NOTE2Y.indexOf(m) >= 0 && Object.keys(c.d[m]).length < years.length) ? ' ※' : '';
-    body += '<tr data-m="' + m + '" class="' + (m === currentMetric ? 'on' : '') + '">'
-         + '<td>' + m + note + '</td>' + tds + '</tr>';
+    body += '<tr data-m="' + esc(m) + '" class="' + (m === currentMetric ? 'on' : '') + '">'
+         + '<td class="l">' + esc(m + note) + '</td>' + tds + '</tr>';
   });
-
   const vals = years.map(y => c.d[currentMetric] ? c.d[currentMetric][y] : undefined);
+  return lineChart(currentMetric, years, vals)
+    + '<div class="tablewrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>'
+    + '<p class="dmeta" style="margin-top:12px">'
+    + '行をタップするとグラフが切り替わります。「※」は制度上2年分しか取得できない指標です。</p>';
+}
 
+function shareholderBody(){
+  const s = current.s || {};
+  let out = '';
+  const kijun = (s.k && (s.k.sh || s.k.own)) || '';
+  if (kijun) out += '<p class="dmeta">' + esc(kijun) + ' 現在</p>';
+  if (s.own && s.own.length){
+    out += '<h3 class="sech">所有者別状況</h3>'
+      + table(['区分', '株主数', '所有株式数(単元)', '割合(％)'],
+              s.own.map(r => [r[0], r[1], r[2], r[3]]), ['l']);
+  }
+  if (s.sh && s.sh.length){
+    // 単位は会社ごとに違う（株・千株・百株）ので、数字にそのまま添える。
+    out += '<h3 class="sech">大株主の状況</h3>'
+      + table(['順位', '氏名又は名称', '住所', '所有株式数', '割合(％)'],
+              s.sh.map(r => [r[0], r[1], r[2], r[3] ? r[3] + (r[4] || '') : '', r[5]]),
+              ['', 'l', 'l']);
+  }
+  return out || '<p class="empty">まだ取得していません</p>';
+}
+
+function officerBody(){
+  const s = current.s || {};
+  let out = '';
+  if (s.k && s.k.of) out += '<p class="dmeta">' + esc(s.k.of) + ' 提出</p>';
+  if (s.of && s.of.length){
+    out += table(['役職名', '氏名', '生年月日', '所有株式数'],
+                 s.of.map(r => [r[0], r[1], r[2], r[4] ? r[4] + (r[5] || '') : '']),
+                 ['l', 'l', 'l']);
+  }
+  return out || '<p class="empty">まだ取得していません</p>';
+}
+
+function render(){
+  const code = current.code, c = current.c;
   document.getElementById('detailView').innerHTML =
       '<button class="back" id="back">← 一覧にもどる</button>'
     + '<p class="dname"></p>'
     + '<p class="dmeta"></p>'
-    + lineChart(currentMetric, years, vals)
-    + '<div class="tablewrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>'
-    + '<p class="dmeta" style="margin-top:12px">'
-    + '行をタップするとグラフが切り替わります。「※」は制度上2年分しか取得できない指標です。</p>';
+    + '<div class="tabbar" id="tabbar"></div>'
+    + '<div id="tabbody"></div>';
 
   document.querySelector('#detailView .dname').textContent = c.n;
   document.querySelector('#detailView .dmeta').textContent = code + '／' + c.e + '／' + c.k;
+
+  renderTabs();
+  document.getElementById('tabbody').innerHTML =
+      currentTab === '株主' ? shareholderBody()
+    : currentTab === '役員' ? officerBody()
+    : financeBody();
 
   document.getElementById('back').onclick = function(){
     document.getElementById('detailView').hidden = true;
     document.getElementById('listView').hidden = false;
   };
-  document.querySelectorAll('#detailView tbody tr').forEach(function(tr){
-    tr.onclick = function(){ currentMetric = tr.dataset.m; render(); };
-  });
+  if (currentTab === '財務'){
+    document.querySelectorAll('#tabbody tbody tr').forEach(function(tr){
+      if (tr.dataset.m) tr.onclick = function(){ currentMetric = tr.dataset.m; render(); };
+    });
+  }
 }
 
 paint(true);

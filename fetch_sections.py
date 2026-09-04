@@ -69,10 +69,13 @@ def col_labels(head_rows):
         return []
     last = head_rows[-1]
     prev = head_rows[-2] if len(head_rows) >= 2 else last
+    # 見出しは元のHTMLで改行されており、そのままだと「金融商品 取引業者」のように
+    # 語中に空白が残る。区切りは上下の段をつなぐときだけに使う。
+    nos = lambda s: re.sub(r"\s+", "", s or "")
     out = []
     for j, name in enumerate(last):
-        up = prev[j] if j < len(prev) else ""
-        out.append(name if up == name or not up else f"{up} {name}")
+        a, b = nos(prev[j] if j < len(prev) else ""), nos(name)
+        out.append(b if a == b or not a else f"{a} {b}")
     return out
 
 

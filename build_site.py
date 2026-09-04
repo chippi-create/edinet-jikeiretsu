@@ -21,6 +21,17 @@ TS_PATH = os.path.join(HERE, "data", "timeseries.csv")
 SITE = os.path.join(HERE, "site")
 TPL_PATH = os.path.join(HERE, "template.html")
 
+# 記述部分。財務とは別のファイルに分けて、タブを開いたときだけ読み込む。
+# 一緒にすると会社を選んだ時点の読み込みが重くなる。
+SECTION_FILES = {
+    "own": (os.path.join(HERE, "data", "ownership.csv"),
+            ["区分", "株主数", "所有株式数_単元", "割合"]),
+    "sh": (os.path.join(HERE, "data", "shareholders.csv"),
+           ["順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]),
+    "of": (os.path.join(HERE, "data", "officers.csv"),
+           ["役職名", "氏名", "生年月日", "任期", "所有株式数", "単位"]),
+}
+
 # 表示の単位。EDINETの値は円・実数なので、そのまま出すと読めない。
 UNITS = {
     "売上高": "億", "営業利益": "億", "経常利益": "億", "純利益": "億",
@@ -37,6 +48,24 @@ NOTE_2Y = {"営業利益", "売上高"}
 
 def bucket_of(sec):
     return sec[:2]
+
+
+def load_sections():
+    """記述部分のCSVを会社ごとに読む。まだ取得していない会社は入らない。"""
+    out = defaultdict(dict)
+    kijun = {}
+    for key, (path, cols) in SECTION_FILES.items():
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            for r in csv.DictReader(f):
+                sec = r["証券コード"]
+                out[sec].setdefault(key, []).append([r.get(c, "") for c in cols])
+                if r.get("基準日"):
+                    kijun.setdefault(sec, {})[key] = r["基準日"]
+    for sec in out:
+        out[sec]["k"] = kijun.get(sec, {})
+    return out
 
 
 def main():
@@ -85,6 +114,18 @@ def main():
         with open(os.path.join(SITE, "d", f"{b}.json"), "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
+    # 記述部分は別ファイル。タブを開いたときだけ取りに行く。
+    os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
+    secs = load_sections()
+    sbuckets = defaultdict(dict)
+    for sec, obj in secs.items():
+        if sec in companies:
+            sbuckets[bucket_of(sec)][sec] = obj
+    for b, obj in sbuckets.items():
+        with open(os.path.join(SITE, "s", f"{b}.json"), "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+    have_sections = sorted(sbuckets)
+
     # 索引はコード順。検索と一覧はこれだけで動く。
     index = [[sec, companies[sec]["n"], companies[sec]["e"], companies[sec]["k"]]
              for sec in sorted(companies)]
@@ -100,6 +141,7 @@ def main():
     html = html.replace("__ORDER__", json.dumps(ORDER, ensure_ascii=False))
     html = html.replace("__NOTE2Y__", json.dumps(sorted(NOTE_2Y), ensure_ascii=False))
     html = html.replace("__INDEX__", json.dumps(index, ensure_ascii=False, separators=(",", ":")))
+    html = html.replace("__SECBUCKETS__", json.dumps(have_sections, separators=(",", ":")))
 
     with open(prev_idx, "w", encoding="utf-8") as f:
         f.write(html)
@@ -107,6 +149,7 @@ def main():
     size = len(html) // 1024
     print(f"site/index.html を書き出しました（{len(companies)}社 / {size}KB / 生成 {generated}）")
     print(f"site/d/ に {len(buckets)}個のJSON")
+    print(f"site/s/ に {len(sbuckets)}個のJSON（記述部分あり {len(secs)}社）")
 
 
 if __name__ == "__main__":

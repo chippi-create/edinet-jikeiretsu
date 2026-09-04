@@ -58,7 +58,10 @@ def main():
                 if v in fetch2.NULLS:
                     continue
                 hit += 1
-                print(f"    {eid:<58} ctx={r['コンテキストID']:<34} len={len(v):>6} 例={v[:40]!r}")
+                n = int(os.environ.get("SAMPLE_LEN", "40"))
+                tags = v.count("<")
+                print(f"    {eid:<58} ctx={r['コンテキストID']:<34} len={len(v):>6} "
+                      f"タグ数={tags:>4} 例={v[:n]!r}")
             print(f"  （該当 {hit} 行）")
             continue
 

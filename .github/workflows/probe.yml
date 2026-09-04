@@ -15,6 +15,9 @@ on:
       raw:
         description: "1ならコンテキストで絞らずそのまま出す"
         default: "0"
+      sample_len:
+        description: "値を何文字まで出すか"
+        default: "40"
 
 jobs:
   probe:
@@ -31,3 +34,4 @@ jobs:
           SEC_CODES: ${{ inputs.sec_codes }}
           KEYWORDS: ${{ inputs.keywords }}
           RAW: ${{ inputs.raw }}
+          SAMPLE_LEN: ${{ inputs.sample_len }}

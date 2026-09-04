@@ -12,6 +12,9 @@ on:
       keywords:
         description: "要素IDにかける正規表現"
         default: "Shareholder|Owner|Director|Officer|CorporateAuditor"
+      raw:
+        description: "1ならコンテキストで絞らずそのまま出す"
+        default: "0"
 
 jobs:
   probe:
@@ -27,3 +30,4 @@ jobs:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           SEC_CODES: ${{ inputs.sec_codes }}
           KEYWORDS: ${{ inputs.keywords }}
+          RAW: ${{ inputs.raw }}

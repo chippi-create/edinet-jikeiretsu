@@ -45,6 +45,23 @@ def main():
         rows = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
         print(f"  全{len(rows)}行")
 
+        # RAW=1 なら、コンテキストの絞り込みをせずそのまま出す。
+        # 記述部分（所有者別状況・大株主・役員など）は本表とコンテキストの付き方が
+        # 違うことがあり、通常モードだと落ちてしまうため。
+        if os.environ.get("RAW") == "1":
+            hit = 0
+            for r in rows:
+                eid = r["要素ID"].split(":")[-1]
+                if not pat.search(eid):
+                    continue
+                v = (r["値"] or "").strip()
+                if v in fetch2.NULLS:
+                    continue
+                hit += 1
+                print(f"    {eid:<58} ctx={r['コンテキストID']:<34} len={len(v):>6} 例={v[:40]!r}")
+            print(f"  （該当 {hit} 行）")
+            continue
+
         seen = {}
         for r in rows:
             eid = r["要素ID"].split(":")[-1]

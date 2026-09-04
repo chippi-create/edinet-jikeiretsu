@@ -18,6 +18,12 @@ on:
       sample_len:
         description: "値を何文字まで出すか"
         default: "40"
+      zip:
+        description: "1なら提出本文書(type=1)のZIPを覗く"
+        default: "0"
+      find:
+        description: "ZIP内で探す要素名"
+        default: "MajorShareholdersTextBlock"
 
 jobs:
   probe:
@@ -35,3 +41,5 @@ jobs:
           KEYWORDS: ${{ inputs.keywords }}
           RAW: ${{ inputs.raw }}
           SAMPLE_LEN: ${{ inputs.sample_len }}
+          ZIP: ${{ inputs.zip }}
+          FIND: ${{ inputs.find }}

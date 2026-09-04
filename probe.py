@@ -23,6 +23,43 @@ KEYWORDS = os.environ.get(
 )
 
 
+def probe_zip(doc_id):
+    """提出本文書(type=1)のZIPを覗く。
+
+    CSV(type=5)はTextBlockのHTMLタグを落としてしまい、表のセル区切りが失われる。
+    元のHTMLがどこに入っているかを確かめるための道具。
+    """
+    import zipfile
+
+    r = fetch2.get(f"{fetch2.BASE}/documents/{doc_id}",
+                   {"type": 1, "Subscription-Key": fetch2.API_KEY}, 300)
+    if r is None:
+        print("  ZIPを取得できませんでした")
+        return
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    names = z.namelist()
+    print(f"  ZIP内 {len(names)}ファイル")
+    for n in names:
+        if n.endswith("/"):
+            continue
+        print(f"    {z.getinfo(n).file_size:>9,}  {n}")
+
+    target = os.environ.get("FIND", "MajorShareholdersTextBlock")
+    for n in names:
+        if not (n.endswith(".xbrl") or n.endswith(".htm") or n.endswith(".html")):
+            continue
+        body = z.read(n).decode("utf-8", "replace")
+        i = body.find(target)
+        if i < 0:
+            continue
+        seg = body[i:i + int(os.environ.get("SAMPLE_LEN", "700"))]
+        print(f"\n  ★ {target} は {n} にあります")
+        print(f"    タグ数(この抜粋内): {seg.count('<')}")
+        print(f"    {seg!r}")
+        return
+    print(f"\n  {target} は見つかりませんでした")
+
+
 def main():
     codes = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
     if not codes:
@@ -38,6 +75,11 @@ def main():
         doc = pair["本体"]
         print("=" * 70)
         print(f"■ {sec} {doc.get('filerName')}  docID={doc['docID']}")
+
+        if os.environ.get("ZIP") == "1":
+            probe_zip(doc["docID"])
+            continue
+
         text = fetch2.download_csv(doc["docID"])
         if text is None:
             print("  CSVを取得できませんでした")

@@ -96,9 +96,19 @@ class TableParser(HTMLParser):
             self._depth += 1
             if self._depth == 1:
                 self._grid, self._span, self._rowno = [], {}, 0
-        elif self._depth >= 1 and tag == "tr":
+            return
+        # 入れ子の表（役員の略歴が年月の表になっている）は、外側のセルの
+        # 文字列として畳む。行として拾うと役員一覧の構造が壊れる。
+        if self._depth >= 2:
+            if self._buf is not None:
+                if tag == "tr":
+                    self._buf.append(" / ")
+                elif tag in ("td", "th", "br"):
+                    self._buf.append(" ")
+            return
+        if tag == "tr":
             self._row = []
-        elif self._depth >= 1 and tag in ("td", "th"):
+        elif tag in ("td", "th"):
             self._buf = []
             self._cs = int(a.get("colspan") or 1)
             self._rs = int(a.get("rowspan") or 1)
@@ -110,9 +120,19 @@ class TableParser(HTMLParser):
             self._buf.append(data)
 
     def handle_endtag(self, tag):
+        if tag == "table":
+            if self._depth == 1 and self._grid:
+                self.tables.append(self._grid)
+                self._grid = None
+            self._depth = max(0, self._depth - 1)
+            return
+        if self._depth >= 2:
+            return
         if tag in ("td", "th") and self._buf is not None:
             text = re.sub(r"\s+", " ", "".join(self._buf)).strip()
             text = text.replace("　", " ").strip()
+            # 入れ子の表を畳んだときに前後に付く区切りを落とす
+            text = re.sub(r"^(?:\s*/\s*)+|(?:\s*/\s*)+$", "", text)
             if self._row is not None:
                 col = len(self._row)
                 while (self._rowno, col) in self._span:
@@ -132,11 +152,6 @@ class TableParser(HTMLParser):
                 self._grid.append(self._row)
             self._row = None
             self._rowno += 1
-        elif tag == "table":
-            if self._depth == 1 and self._grid:
-                self.tables.append(self._grid)
-                self._grid = None
-            self._depth = max(0, self._depth - 1)
 
 
 def tables_of(html):

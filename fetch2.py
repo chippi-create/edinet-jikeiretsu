@@ -24,9 +24,9 @@ AUTO_PICK = int(os.environ.get("AUTO_PICK", "0") or "0")
 SLEEP = 4
 RETRY = 3
 INDEX_PATH = "docs_index.json"
-OUT_DIR = "out"
 
-# 取得結果はリポジトリに貯める。out/ はActionsのアーティファクト用（90日で消える）。
+# 取得結果はリポジトリに貯める。以前はActionsのアーティファクトに出していたが、
+# 90日で消えるうえ実行のたびにゼロから取り直しになるためやめた。
 DATA_DIR = "data"
 TS_PATH = os.path.join(DATA_DIR, "timeseries.csv")
 STATE_PATH = os.path.join(DATA_DIR, "fetch_state.json")
@@ -310,7 +310,7 @@ def main():
         log("docs_index.json がありません。先に edinet-index を実行してください。")
         sys.exit(1)
 
-    os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(INDEX_PATH, encoding="utf-8") as f:
         index = json.load(f)
     log(f"■ 索引: {len(index['docs'])}件 / {len(index['days'])}日ぶん")

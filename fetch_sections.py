@@ -120,7 +120,9 @@ def parse_shareholders(tabs):
         h = -1
         for i, row in enumerate(t[:4]):
             joined = " ".join(row)
-            if "氏名又は名称" in joined and "所有株式数" in joined and "保有株券等" not in joined:
+            # 「氏名又は名称」と「氏名または名称」の両方がある。漢字だけを見ると取りこぼす。
+            if "氏名" in joined and "名称" in joined \
+                    and "所有株式数" in joined and "保有株券等" not in joined:
                 h = i
                 break
         if h < 0:

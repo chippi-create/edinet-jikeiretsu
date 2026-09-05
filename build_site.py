@@ -11,6 +11,7 @@ build_site.py — data/timeseries.csv からサイトを組み立てる
 """
 
 import os
+import re
 import csv
 import json
 import datetime
@@ -50,6 +51,20 @@ def bucket_of(sec):
     return sec[:2]
 
 
+def norm_category(s):
+    """所有者別状況の区分名をそろえる。
+
+    有報の表記は会社ごとに揺れる。「単元未満株式の状況」は全角括弧・半角括弧・
+    括弧なしの4通り、「政府及び」と「政府および」、末尾の（注）の有無もある。
+    中身は同じなので、表示と集計のためにここで寄せる。
+    CSVは原典どおりのまま残す。
+    """
+    s = (s or "").strip()
+    s = re.sub(r"\s*[（(][^（()）]*[)）]\s*$", "", s)   # 末尾の（株）（注）などを落とす
+    s = s.replace("および", "及び")
+    return s.strip()
+
+
 def load_sections():
     """記述部分のCSVを会社ごとに読む。まだ取得していない会社は入らない。"""
     out = defaultdict(dict)
@@ -60,7 +75,10 @@ def load_sections():
         with open(path, encoding="utf-8-sig", newline="") as f:
             for r in csv.DictReader(f):
                 sec = r["証券コード"]
-                out[sec].setdefault(key, []).append([r.get(c, "") for c in cols])
+                vals = [r.get(c, "") for c in cols]
+                if key == "own":
+                    vals[0] = norm_category(vals[0])
+                out[sec].setdefault(key, []).append(vals)
                 if r.get("基準日"):
                     kijun.setdefault(sec, {})[key] = r["基準日"]
     for sec in out:

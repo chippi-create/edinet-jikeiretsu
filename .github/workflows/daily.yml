@@ -1,21 +1,29 @@
 name: edinet daily
 
-# 索引を最新にしてから、まだ取っていない会社を LIMIT 社ぶん取得する。
+# 索引を最新にしてから、財務指標と記述部分を取り、サイトを作り直して1回でコミットする。
+#
+# 以前は財務と記述部分を別のワークフローに分けていたが、どちらも data/ と site/ を
+# 書くため、同時に走ると生成物が add/add で衝突し rebase が detached HEAD で止まった。
+# 生成物を書くジョブは1つだけにする。
+#
 # 一度に全社は取らない（EDINETに短時間で大量アクセスしないため）。
-# 3,768社なので、600社ずつで7日かけて一巡する。以降は新しい有報が出た会社だけが対象になる。
+# 約3,800社を財務は7日、記述部分は13日かけて一巡し、
+# 以降は新しい報告書が出た会社だけが対象になる。
 on:
   schedule:
     - cron: "0 22 * * *"   # 毎日 07:00 JST
   workflow_dispatch:
     inputs:
       limit:
-        description: "1回で処理する会社数"
+        description: "財務を1回で処理する会社数"
         default: "600"
+      sections_limit:
+        description: "記述部分を1回で処理する会社数（ZIPが大きいので少なめ）"
+        default: "300"
 
 permissions:
   contents: write
 
-# 前の実行が終わる前に次が始まると、docs_index.json の取り合いになる
 concurrency:
   group: edinet-daily
   cancel-in-progress: false
@@ -31,7 +39,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install requests
+      - run: pip install -r requirements.txt
 
       # 直近30日ぶんだけ見る。取得済みの日は index.py 側で自動的に飛ばされる。
       - name: update index
@@ -44,11 +52,19 @@ jobs:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           MAX_DAYS: "30"
 
-      - name: fetch companies
+      - name: fetch financials
         run: python fetch2.py
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           LIMIT: ${{ inputs.limit || '600' }}
+
+      # 記述部分が落ちても財務ぶんは残したいので、ここで止めない。
+      - name: fetch sections
+        continue-on-error: true
+        run: python fetch_sections.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          LIMIT: ${{ inputs.sections_limit || '300' }}
 
       - name: build site
         run: python build_site.py
@@ -59,9 +75,27 @@ jobs:
           git config user.name "edinet-bot"
           git config user.email "edinet-bot@users.noreply.github.com"
           git add docs_index.json data site
-          git diff --staged --quiet || git commit -m "edinet: $(date -u +%Y-%m-%d)"
-          git pull --rebase --autostash || true
-          git push
+          if git diff --staged --quiet; then
+            echo "変更はありません"
+            exit 0
+          fi
+          git commit -m "edinet: $(date -u +%Y-%m-%d)"
+          # data/ と site/ は生成物なので、衝突したら今回作ったものを採る。
+          # 手作業のpushと重なっても止まらないようにする。
+          for i in 1 2 3; do
+            git fetch -q origin main
+            if git rebase -X theirs origin/main; then
+              if git push; then
+                exit 0
+              fi
+            else
+              git rebase --abort || true
+            fi
+            echo "push をやり直します（$i 回目）"
+            sleep 10
+          done
+          echo "push に失敗しました" >&2
+          exit 1
 
       - uses: actions/upload-artifact@v4
         if: always()

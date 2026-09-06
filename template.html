@@ -166,7 +166,8 @@ function paint(reset){
     const n = document.createElement('span'); n.textContent = rec[1];
     const k = document.createElement('span'); k.className = 'kessan'; k.textContent = rec[2];
     b.append(c, n, k);
-    b.onclick = () => openCompany(rec[0]);
+    // URLのハッシュを唯一の状態にする。戻るボタンと共有リンクが同じ仕組みで動く。
+    b.onclick = () => { location.hash = rec[0]; };
     frag.appendChild(b);
   }
   list.appendChild(frag);
@@ -232,10 +233,31 @@ function loadSections(code){
   return scache[b];
 }
 
+const TITLE = document.title;
+
+function showList(){
+  current = null;
+  document.getElementById('detailView').hidden = true;
+  document.getElementById('listView').hidden = false;
+  document.title = TITLE;
+}
+
+// URLのハッシュから会社を開く。共有・ブックマーク・戻るボタンが全部これで動く。
+const CODES = {};
+IDX.forEach(function(r){ CODES[r[0]] = 1; });
+
+function route(){
+  const code = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+  if (code && CODES[code]) openCompany(code);
+  else showList();
+}
+window.addEventListener('hashchange', route);
+
 function openCompany(code){
   loadBucket(code).then(function(bucket){
     const c = bucket[code];
     if (!c) return;
+    document.title = c.n + '（' + code + '）｜' + TITLE;
     current = {code: code, c: c, s: undefined};
     const metrics = ORDER.filter(m => c.d[m]);
     currentMetric = metrics.indexOf('売上高') >= 0 ? '売上高' : metrics[0];
@@ -512,8 +534,8 @@ function render(){
     : financeBody();
 
   document.getElementById('back').onclick = function(){
-    document.getElementById('detailView').hidden = true;
-    document.getElementById('listView').hidden = false;
+    if (location.hash) location.hash = '';   // hashchange が一覧に戻す
+    else showList();
   };
   if (currentTab === '財務'){
     document.querySelectorAll('#tabbody tbody tr').forEach(function(tr){
@@ -533,6 +555,7 @@ function render(){
 }
 
 paint(true);
+route();   // #1332 のようなURLで開かれたら、その会社を表示する
 </script>
 </body>
 </html>

@@ -61,6 +61,11 @@ th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
 .btn:hover{opacity:.9}
 ul.plain{margin:0 0 12px; padding-left:1.3em}
 ul.plain li{margin:0 0 6px; line-height:1.8}
+tr.ofrow{cursor:pointer}
+.caret{color:var(--accent); font-size:10px; margin-left:6px}
+tr.biorow td{background:var(--paper); white-space:normal}
+.bio{max-width:44em; font-size:12px; line-height:1.9; color:var(--mute)}
+.bio div{margin:0 0 3px}
 thead th{background:var(--paper); font-size:12px; color:var(--mute)}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--paper)}
@@ -408,16 +413,55 @@ function shareholderBody(){
   return out || '<p class="empty">まだ取得していません</p>';
 }
 
+// 略歴は1人あたり数百字あるので会社ごとの別ファイル。役員のタブを開いたときに読む。
+const bcache = {};
+function loadBios(code){
+  if (bcache[code] !== undefined) return Promise.resolve(bcache[code]);
+  return fetch('bio/' + code + '.json').then(function(r){ return r.ok ? r.json() : []; })
+    .catch(function(){ return []; })
+    .then(function(j){ bcache[code] = j; return j; });
+}
+
 function officerBody(){
   const s = current.s || {};
+  const code = current.code;
+  if (!s.of || !s.of.length) return '<p class="empty">まだ取得していません</p>';
+
+  if (s.b && bcache[code] === undefined){
+    loadBios(code).then(function(){
+      if (current && current.code === code && currentTab === '役員') render();
+    });
+  }
+  const bios = bcache[code] || [];
+  const bioOf = {};
+  bios.forEach(function(b){ bioOf[b[0]] = b[1]; });
+
   let out = '';
   if (s.k && s.k.of) out += '<p class="dmeta">' + esc(s.k.of) + ' 提出</p>';
-  if (s.of && s.of.length){
-    out += table(['役職名', '氏名', '生年月日', '所有株式数'],
-                 s.of.map(r => [r[0], r[1], r[2], r[4] ? r[4] + (r[5] || '') : '']),
-                 ['l', 'l', 'l']);
+  let body = '';
+  s.of.forEach(function(r, i){
+    const bio = bioOf[r[1]] || '';
+    body += '<tr class="ofrow" data-i="' + i + '">'
+      + '<td class="l">' + esc(r[0] || '—') + (bio ? '<span class="caret">▸</span>' : '') + '</td>'
+      + '<td class="l">' + esc(r[1] || '—') + '</td>'
+      + '<td class="l">' + esc(r[2] || '—') + '</td>'
+      + '<td>' + esc(r[4] ? r[4] + (r[5] || '') : '—') + '</td></tr>';
+    if (bio) {
+      body += '<tr class="biorow" data-for="' + i + '" hidden><td class="l" colspan="4">'
+        + '<div class="bio">' + bio.split(' / ')
+            .map(function(x){ return '<div>' + esc(x) + '</div>'; }).join('')
+        + '</div></td></tr>';
+    }
+  });
+  out += '<div class="tablewrap"><table><thead><tr>'
+    + '<th class="l">役職名</th><th class="l">氏名</th><th class="l">生年月日</th><th>所有株式数</th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  if (bios.length) {
+    out += '<p class="dmeta">役職名に ▸ が付いている行をタップすると略歴が開きます。</p>';
+  } else if (s.b) {
+    out += '<p class="dmeta">略歴を読み込んでいます…</p>';
   }
-  return out || '<p class="empty">まだ取得していません</p>';
+  return out;
 }
 
 function render(){
@@ -452,6 +496,16 @@ function render(){
   if (currentTab === '財務'){
     document.querySelectorAll('#tabbody tbody tr').forEach(function(tr){
       if (tr.dataset.m) tr.onclick = function(){ currentMetric = tr.dataset.m; render(); };
+    });
+  } else if (currentTab === '役員'){
+    document.querySelectorAll('#tabbody tr.ofrow').forEach(function(tr){
+      const bio = document.querySelector('#tabbody tr.biorow[data-for="' + tr.dataset.i + '"]');
+      if (!bio) return;
+      tr.onclick = function(){
+        bio.hidden = !bio.hidden;
+        const c = tr.querySelector('.caret');
+        if (c) c.textContent = bio.hidden ? '▸' : '▾';
+      };
     });
   }
 }

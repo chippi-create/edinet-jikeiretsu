@@ -145,33 +145,41 @@ def main():
 
     # 事業等のリスクは1社2万字ほどある。帯のJSONに混ぜると開いた瞬間に重くなるので、
     # 会社ごとのファイルにして、リスクのタブを見るときだけ取りに行く。
-    risk_src = os.path.join(HERE, "data", "risks")
-    risk_dst = os.path.join(SITE, "risk")
-    has_risk = set()
-    if os.path.isdir(risk_src):
-        os.makedirs(risk_dst, exist_ok=True)
-        for fn in os.listdir(risk_src):
-            if not fn.endswith(".txt"):
+    def copy_per_company(src_name, dst_name, ext):
+        src = os.path.join(HERE, "data", src_name)
+        dst = os.path.join(SITE, dst_name)
+        got = set()
+        if not os.path.isdir(src):
+            return got
+        os.makedirs(dst, exist_ok=True)
+        for fn in os.listdir(src):
+            if not fn.endswith(ext):
                 continue
-            sec = fn[:-4]
-            with open(os.path.join(risk_src, fn), encoding="utf-8") as f:
+            with open(os.path.join(src, fn), encoding="utf-8") as f:
                 body = f.read()
             if not body.strip():
                 continue
-            with open(os.path.join(risk_dst, fn), "w", encoding="utf-8") as f:
+            with open(os.path.join(dst, fn), "w", encoding="utf-8") as f:
                 f.write(body)
-            has_risk.add(sec)
+            got.add(fn[:-len(ext)])
+        return got
+
+    has_risk = copy_per_company("risks", "risk", ".txt")
+    # 役員の略歴も同じ扱い。役員のタブを開いたときだけ取りに行く。
+    has_bio = copy_per_company("bios", "bio", ".json")
 
     # 記述部分は別ファイル。タブを開いたときだけ取りに行く。
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
     secs = load_sections()
     sbuckets = defaultdict(dict)
-    for sec in set(secs) | has_risk:
+    for sec in set(secs) | has_risk | has_bio:
         if sec not in companies:
             continue
         obj = secs.get(sec, {})
         if sec in has_risk:
             obj["r"] = 1
+        if sec in has_bio:
+            obj["b"] = 1
         sbuckets[bucket_of(sec)][sec] = obj
     for b, obj in sbuckets.items():
         with open(os.path.join(SITE, "s", f"{b}.json"), "w", encoding="utf-8") as f:
@@ -203,6 +211,7 @@ def main():
     print(f"site/d/ に {len(buckets)}個のJSON")
     print(f"site/s/ に {len(sbuckets)}個のJSON（記述部分あり {len(secs)}社）")
     print(f"site/risk/ に {len(has_risk)}社ぶんのリスク本文")
+    print(f"site/bio/ に {len(has_bio)}社ぶんの役員略歴")
 
 
 if __name__ == "__main__":

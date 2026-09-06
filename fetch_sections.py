@@ -37,15 +37,15 @@ DIVIDEND = os.path.join(DATA_DIR, "dividend.csv")
 # GitHubの大きなファイルの警告に触れる。会社ごとに分けて、変更のあった
 # ファイルだけが書き換わるようにする。
 RISK_DIR = os.path.join(DATA_DIR, "risks")
+# 役員の略歴も同じ理由で会社ごとに分ける。1人あたり数百字あり、
+# 全社ぶんを officers.csv に入れると30MB近くなって毎日書き換わる。
+BIO_DIR = os.path.join(DATA_DIR, "bios")
 
 F_OWN = ["証券コード", "会社名", "基準日", "区分", "株主数", "所有株式数_単元", "割合"]
 F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]
 F_OF = ["証券コード", "会社名", "基準日", "役職名", "氏名", "生年月日", "任期", "所有株式数", "単位"]
 F_BIZ = ["証券コード", "会社名", "基準日", "本文"]
 F_DIV = ["証券コード", "会社名", "基準日", "本文"]
-
-# 略歴はCSVに入れない。1人あたり数百字あり、3,800社ぶんでは巨大になって
-# 毎日の書き換えでGit履歴が膨らむため。必要になったら別ファイルにする。
 
 
 def log(*a):
@@ -166,7 +166,7 @@ def parse_officers(tabs):
             continue
         idx = {}
         for j, name in enumerate(head):
-            for key in ("役職名", "氏名", "生年月日", "任期", "所有株式数"):
+            for key in ("役職名", "氏名", "生年月日", "任期", "所有株式数", "略歴"):
                 if key in name and key not in idx:
                     idx[key] = j
         if "氏名" not in idx:
@@ -179,7 +179,8 @@ def parse_officers(tabs):
                 continue
             out.append({"役職名": get("役職名"), "氏名": name,
                         "生年月日": get("生年月日"), "任期": get("任期"),
-                        "所有株式数": num(get("所有株式数")), "単位": unit})
+                        "所有株式数": num(get("所有株式数")), "単位": unit,
+                        "略歴": get("略歴")})
     return out
 
 
@@ -218,6 +219,8 @@ def main():
     biz = load_rows(BUSINESS)
     div = load_rows(DIVIDEND)
     nrisk = len(os.listdir(RISK_DIR)) if os.path.isdir(RISK_DIR) else 0
+    nbio = len(os.listdir(BIO_DIR)) if os.path.isdir(BIO_DIR) else 0
+    log(f"■ 略歴 {nbio}社")
     log(f"■ 蓄積の現状: 事業 {len(biz)}社 / 配当 {len(div)}社 / リスク {nrisk}社 "
         f"/ 所有者別 {len(own)}社 / 大株主 {len(sh)}社 / 役員 {len(of)}社")
 
@@ -273,8 +276,18 @@ def main():
 
         f = parse_officers(sections.tables_of(
             blocks.get("InformationAboutOfficersTextBlock", "")))
-        of[sec] = [dict(r, 証券コード=sec, 会社名=name,
-                        基準日=(doc.get("submitDateTime") or "")[:10]) for r in f]
+        of[sec] = [{k: v for k, v in dict(r, 証券コード=sec, 会社名=name,
+                                          基準日=(doc.get("submitDateTime") or "")[:10]).items()
+                    if k != "略歴"} for r in f]
+        # 略歴は会社ごとのファイルへ。氏名も一緒に持たせて、表の行と照合できるようにする。
+        os.makedirs(BIO_DIR, exist_ok=True)
+        bpath = os.path.join(BIO_DIR, f"{sec}.json")
+        bios = [[r["氏名"], r.get("略歴", "")] for r in f if r.get("略歴")]
+        if bios:
+            with open(bpath, "w", encoding="utf-8") as fp:
+                json.dump(bios, fp, ensure_ascii=False, separators=(",", ":"))
+        elif os.path.exists(bpath):
+            os.remove(bpath)
 
         log(f"  {sec} {name}: 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
             f"/ 所有者別{len(own[sec])}区分 / 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")

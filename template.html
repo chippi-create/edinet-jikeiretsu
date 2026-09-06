@@ -56,6 +56,11 @@ th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
   color:var(--mute); background:var(--paper); border:1px solid var(--rule); border-radius:8px}
 .src{color:var(--accent); text-decoration:none; white-space:nowrap}
 .src:hover{text-decoration:underline}
+.btn{display:inline-block; padding:11px 18px; border-radius:8px; text-decoration:none;
+  background:var(--accent); color:#fff; font-weight:600}
+.btn:hover{opacity:.9}
+ul.plain{margin:0 0 12px; padding-left:1.3em}
+ul.plain li{margin:0 0 6px; line-height:1.8}
 thead th{background:var(--paper); font-size:12px; color:var(--mute)}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--paper)}
@@ -252,6 +257,7 @@ const TABS = [
   ['リスク', 'r'],
   ['株主', 'sh'],
   ['役員', 'of'],
+  ['原本', 'd'],
 ];
 
 function renderTabs(){
@@ -263,6 +269,7 @@ function renderTabs(){
     // リスクは会社ごとの別ファイルなので、有無だけを旗で持っている。
     const has = key === null ? true
       : key === 'r' ? !!(current.s && current.s.r)
+      : key === 'd' ? !!(current.s && current.s.d)
       : !!(current.s && current.s[key] && current.s[key].length);
     const b = document.createElement('button');
     b.className = 'tab' + (name === currentTab ? ' on' : '');
@@ -361,6 +368,26 @@ function riskBody(){
   return '<p class="empty">読み込んでいます…</p>';
 }
 
+function sourceBody(){
+  const s = current.s || {};
+  if (!s.d) return '<p class="empty">まだ取得していません</p>';
+  const url = 'https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?' + encodeURIComponent(s.d);
+  return '<p><a class="btn" target="_blank" rel="noopener noreferrer" href="' + url + '">'
+       + 'EDINETで有価証券報告書の原本を開く</a></p>'
+    + '<div class="prose">'
+    + '<p>本サイトは有価証券報告書から機械的に抜き出した項目だけを表示しています。'
+    + '次のものは原本にしかありません。</p>'
+    + '<ul class="plain">'
+    + '<li>事業系統図・組織図などの<strong>図表</strong>（画像のため掲載していません）</li>'
+    + '<li>財務諸表の本表と<strong>注記</strong></li>'
+    + '<li><strong>監査報告書</strong></li>'
+    + '<li>ここに出していないその他の記載事項</li>'
+    + '</ul>'
+    + '<p>数値が重要な判断に関わる場合は、必ず原本をご確認ください。</p>'
+    + '</div>'
+    + '<p class="dmeta">書類ID: ' + esc(s.d) + '</p>';
+}
+
 function shareholderBody(){
   const s = current.s || {};
   let out = '';
@@ -415,6 +442,7 @@ function render(){
     : currentTab === 'リスク' ? riskBody()
     : currentTab === '株主' ? shareholderBody()
     : currentTab === '役員' ? officerBody()
+    : currentTab === '原本' ? sourceBody()
     : financeBody();
 
   document.getElementById('back').onclick = function(){

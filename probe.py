@@ -76,6 +76,28 @@ def main():
         print("=" * 70)
         print(f"■ {sec} {doc.get('filerName')}  docID={doc['docID']}")
 
+        if os.environ.get("HOSTS") == "1":
+            # 有報の中に出てくるURLのホストを数える。どれが自社サイトかを
+            # 決め打ちせず、実際の分布を見てから判断するための道具。
+            import zipfile
+            import collections
+            r = fetch2.get(f"{fetch2.BASE}/documents/{doc['docID']}",
+                           {"type": 1, "Subscription-Key": fetch2.API_KEY}, 300)
+            if r is None:
+                print("  ZIPを取得できませんでした")
+                continue
+            z = zipfile.ZipFile(io.BytesIO(r.content))
+            c = collections.Counter()
+            for n in z.namelist():
+                if not (n.endswith(".htm") and "/PublicDoc/" in n):
+                    continue
+                body = z.read(n).decode("utf-8", "replace")
+                for m in re.finditer(r"https?://([A-Za-z0-9.\-]+)", body):
+                    c[m.group(1).lower()] += 1
+            for host, n in c.most_common(12):
+                print(f"    {n:>4}回  {host}")
+            continue
+
         if os.environ.get("ZIP") == "1":
             probe_zip(doc["docID"])
             continue

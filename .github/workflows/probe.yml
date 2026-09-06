@@ -24,6 +24,9 @@ on:
       find:
         description: "ZIP内で探す要素名"
         default: "MajorShareholdersTextBlock"
+      hosts:
+        description: "1なら有報に出てくるURLのホストを数える"
+        default: "0"
 
 jobs:
   probe:
@@ -43,3 +46,4 @@ jobs:
           SAMPLE_LEN: ${{ inputs.sample_len }}
           ZIP: ${{ inputs.zip }}
           FIND: ${{ inputs.find }}
+          HOSTS: ${{ inputs.hosts }}

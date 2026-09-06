@@ -71,6 +71,13 @@ def load_sections():
     """記述部分のCSVを会社ごとに読む。まだ取得していない会社は入らない。"""
     out = defaultdict(dict)
     kijun = {}
+    # どの書類から取ったかを持たせて、EDINETの原本へリンクできるようにする。
+    # 事業系統図のように画像で載っている部分は本サイトに出せないため。
+    docs = {}
+    sp = os.path.join(HERE, "data", "sections_state.json")
+    if os.path.exists(sp):
+        with open(sp, encoding="utf-8") as f:
+            docs = {k: v.get("docID", "") for k, v in json.load(f).items()}
     for key, (path, cols) in SECTION_FILES.items():
         if not os.path.exists(path):
             continue
@@ -85,6 +92,8 @@ def load_sections():
                     kijun.setdefault(sec, {})[key] = r["基準日"]
     for sec in out:
         out[sec]["k"] = kijun.get(sec, {})
+        if docs.get(sec):
+            out[sec]["d"] = docs[sec]
     return out
 
 

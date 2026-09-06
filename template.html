@@ -52,6 +52,10 @@ th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
 .sech{font-size:13px; margin:18px 0 6px; font-weight:600}
 .prose{max-width:44em}
 .prose p{margin:0 0 12px; line-height:1.9}
+.note{max-width:44em; margin:16px 0 0; padding:10px 12px; font-size:12px; line-height:1.8;
+  color:var(--mute); background:var(--paper); border:1px solid var(--rule); border-radius:8px}
+.src{color:var(--accent); text-decoration:none; white-space:nowrap}
+.src:hover{text-decoration:underline}
 thead th{background:var(--paper); font-size:12px; color:var(--mute)}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--paper)}
@@ -315,13 +319,30 @@ function prose(text){
     .map(function(x){ return '<p>' + esc(x) + '</p>'; }).join('') + '</div>';
 }
 
+// EDINETの原本を開くリンク。図表は画像で載っていて本サイトに出せないので、
+// 原本にあたれる導線を必ず用意する。
+function sourceLink(label){
+  const d = current.s && current.s.d;
+  if (!d) return '';
+  return '<a class="src" target="_blank" rel="noopener noreferrer" href="'
+    + 'https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?' + encodeURIComponent(d) + '">'
+    + esc(label) + '</a>';
+}
+
 function proseBody(key){
   const s = current.s || {};
   const rows = s[key] || [];
   if (!rows.length || !rows[0][0]) return '<p class="empty">まだ取得していません</p>';
+  const text = rows[0][0];
   let out = '';
   if (s.k && s.k[key]) out += '<p class="dmeta">' + esc(s.k[key]) + ' 現在</p>';
-  return out + prose(rows[0][0]);
+  out += prose(text);
+  // 本文が図を指しているのに図が無い、という状態にしない。
+  if (/系統図|図示|次のとおりであります。\s*$/.test(text)) {
+    out += '<p class="note">本文が指している事業系統図は画像のため、本サイトには掲載していません。'
+        + sourceLink('EDINETの原本で見る') + '</p>';
+  }
+  return out;
 }
 
 // リスクは2万字級なので会社ごとの別ファイル。タブを開いたときに読みに行く。
@@ -382,7 +403,10 @@ function render(){
     + '<div id="tabbody"></div>';
 
   document.querySelector('#detailView .dname').textContent = c.n;
-  document.querySelector('#detailView .dmeta').textContent = code + '／' + c.e + '／' + c.k;
+  const meta = document.querySelector('#detailView .dmeta');
+  meta.textContent = code + '／' + c.e + '／' + c.k;
+  const link = sourceLink('EDINETの原本');
+  if (link) meta.insertAdjacentHTML('beforeend', '　' + link);
 
   renderTabs();
   document.getElementById('tabbody').innerHTML =

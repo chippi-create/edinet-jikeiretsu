@@ -42,7 +42,9 @@ table{border-collapse:collapse; width:100%; min-width:520px; font-size:13px}
 th,td{padding:8px 10px; border-bottom:1px solid var(--rule); text-align:right;
   font-variant-numeric:tabular-nums; white-space:nowrap}
 th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
-.tabbar{display:flex; gap:6px; margin:4px 0 14px; border-bottom:1px solid var(--rule)}
+.tabbar{display:flex; gap:6px; margin:4px 0 14px; border-bottom:1px solid var(--rule);
+  overflow-x:auto; -webkit-overflow-scrolling:touch}
+.tab{flex:0 0 auto}
 .tab{font:inherit; background:none; border:0; border-bottom:2px solid transparent;
   padding:8px 12px; cursor:pointer; color:var(--mute)}
 .tab.on{color:var(--accent); border-bottom-color:var(--accent); font-weight:600}
@@ -242,6 +244,8 @@ function openCompany(code){
 const TABS = [
   ['財務', null],
   ['事業', 'biz'],
+  ['配当', 'div'],
+  ['リスク', 'r'],
   ['株主', 'sh'],
   ['役員', 'of'],
 ];
@@ -252,7 +256,10 @@ function renderTabs(){
   bar.innerHTML = '';
   TABS.forEach(function(t){
     const name = t[0], key = t[1];
-    const has = key === null || (current.s && current.s[key] && current.s[key].length);
+    // リスクは会社ごとの別ファイルなので、有無だけを旗で持っている。
+    const has = key === null ? true
+      : key === 'r' ? !!(current.s && current.s.r)
+      : !!(current.s && current.s[key] && current.s[key].length);
     const b = document.createElement('button');
     b.className = 'tab' + (name === currentTab ? ' on' : '');
     b.textContent = name;
@@ -301,17 +308,36 @@ function financeBody(){
     + '行をタップするとグラフが切り替わります。「※」は制度上2年分しか取得できない指標です。</p>';
 }
 
-function businessBody(){
-  const s = current.s || {};
-  const rows = s.biz || [];
-  if (!rows.length || !rows[0][0]) return '<p class="empty">まだ取得していません</p>';
-  let out = '';
-  if (s.k && s.k.biz) out += '<p class="dmeta">' + esc(s.k.biz) + ' 現在</p>';
-  // 有報の本文をそのまま出す。段落は取得時に改行として残してある。
-  out += '<div class="prose">' + rows[0][0].split('\n')
+// 有報の本文をそのまま出す。段落は取得時に改行として残してある。
+function prose(text){
+  return '<div class="prose">' + String(text).split('\n')
     .filter(function(x){ return x.trim(); })
     .map(function(x){ return '<p>' + esc(x) + '</p>'; }).join('') + '</div>';
-  return out;
+}
+
+function proseBody(key){
+  const s = current.s || {};
+  const rows = s[key] || [];
+  if (!rows.length || !rows[0][0]) return '<p class="empty">まだ取得していません</p>';
+  let out = '';
+  if (s.k && s.k[key]) out += '<p class="dmeta">' + esc(s.k[key]) + ' 現在</p>';
+  return out + prose(rows[0][0]);
+}
+
+// リスクは2万字級なので会社ごとの別ファイル。タブを開いたときに読みに行く。
+const rcache = {};
+function riskBody(){
+  const code = current.code;
+  if (rcache[code] !== undefined) {
+    return rcache[code] ? prose(rcache[code]) : '<p class="empty">まだ取得していません</p>';
+  }
+  fetch('risk/' + code + '.txt').then(function(r){ return r.ok ? r.text() : ''; })
+    .catch(function(){ return ''; })
+    .then(function(t){
+      rcache[code] = t;
+      if (current && current.code === code && currentTab === 'リスク') render();
+    });
+  return '<p class="empty">読み込んでいます…</p>';
 }
 
 function shareholderBody(){
@@ -360,7 +386,9 @@ function render(){
 
   renderTabs();
   document.getElementById('tabbody').innerHTML =
-      currentTab === '事業' ? businessBody()
+      currentTab === '事業' ? proseBody('biz')
+    : currentTab === '配当' ? proseBody('div')
+    : currentTab === 'リスク' ? riskBody()
     : currentTab === '株主' ? shareholderBody()
     : currentTab === '役員' ? officerBody()
     : financeBody();

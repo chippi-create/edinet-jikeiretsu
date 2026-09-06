@@ -26,6 +26,7 @@ TPL_PATH = os.path.join(HERE, "template.html")
 # 一緒にすると会社を選んだ時点の読み込みが重くなる。
 SECTION_FILES = {
     "biz": (os.path.join(HERE, "data", "business.csv"), ["本文"]),
+    "div": (os.path.join(HERE, "data", "dividend.csv"), ["本文"]),
     "own": (os.path.join(HERE, "data", "ownership.csv"),
             ["区分", "株主数", "所有株式数_単元", "割合"]),
     "sh": (os.path.join(HERE, "data", "shareholders.csv"),
@@ -133,13 +134,36 @@ def main():
         with open(os.path.join(SITE, "d", f"{b}.json"), "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
+    # 事業等のリスクは1社2万字ほどある。帯のJSONに混ぜると開いた瞬間に重くなるので、
+    # 会社ごとのファイルにして、リスクのタブを見るときだけ取りに行く。
+    risk_src = os.path.join(HERE, "data", "risks")
+    risk_dst = os.path.join(SITE, "risk")
+    has_risk = set()
+    if os.path.isdir(risk_src):
+        os.makedirs(risk_dst, exist_ok=True)
+        for fn in os.listdir(risk_src):
+            if not fn.endswith(".txt"):
+                continue
+            sec = fn[:-4]
+            with open(os.path.join(risk_src, fn), encoding="utf-8") as f:
+                body = f.read()
+            if not body.strip():
+                continue
+            with open(os.path.join(risk_dst, fn), "w", encoding="utf-8") as f:
+                f.write(body)
+            has_risk.add(sec)
+
     # 記述部分は別ファイル。タブを開いたときだけ取りに行く。
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
     secs = load_sections()
     sbuckets = defaultdict(dict)
-    for sec, obj in secs.items():
-        if sec in companies:
-            sbuckets[bucket_of(sec)][sec] = obj
+    for sec in set(secs) | has_risk:
+        if sec not in companies:
+            continue
+        obj = secs.get(sec, {})
+        if sec in has_risk:
+            obj["r"] = 1
+        sbuckets[bucket_of(sec)][sec] = obj
     for b, obj in sbuckets.items():
         with open(os.path.join(SITE, "s", f"{b}.json"), "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
@@ -169,6 +193,7 @@ def main():
     print(f"site/index.html を書き出しました（{len(companies)}社 / {size}KB / 生成 {generated}）")
     print(f"site/d/ に {len(buckets)}個のJSON")
     print(f"site/s/ に {len(sbuckets)}個のJSON（記述部分あり {len(secs)}社）")
+    print(f"site/risk/ に {len(has_risk)}社ぶんのリスク本文")
 
 
 if __name__ == "__main__":

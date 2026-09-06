@@ -23,13 +23,16 @@ import fetch2
 # 取り出す対象。要素名 -> ラベル
 TARGETS = {
     "DescriptionOfBusinessTextBlock": "事業の内容",
+    "DividendPolicyTextBlock": "配当政策",
+    "BusinessRisksTextBlock": "事業等のリスク",
     "ShareholdingByShareholderCategoryTextBlock": "所有者別状況",
     "MajorShareholdersTextBlock": "大株主の状況",
     "InformationAboutOfficersTextBlock": "役員の状況",
 }
 
 # 表ではなく文章として読むもの。段落の区切りを残す必要がある。
-PROSE = {"DescriptionOfBusinessTextBlock"}
+PROSE = {"DescriptionOfBusinessTextBlock", "DividendPolicyTextBlock",
+         "BusinessRisksTextBlock"}
 
 
 def log(*a):

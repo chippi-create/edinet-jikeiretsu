@@ -155,8 +155,13 @@ def parse_shareholders(tabs):
 
 
 def parse_officers(tabs):
-    """役員の状況。1つの一覧が複数の表に分かれていることがあるのでつなぐ。"""
-    out = []
+    """役員の状況。1つの一覧が複数の表に分かれていることがあるのでつなぐ。
+
+    改ページで分割された表に同じ人が重ねて載っていることがあり、
+    そのままつなぐと二重になる（ニッスイで31名が41行になっていた）。
+    氏名と生年月日が一致する行は最初のものだけ採る。
+    """
+    out, seen = [], set()
     for t in tabs:
         if not t:
             continue
@@ -177,6 +182,10 @@ def parse_officers(tabs):
             name = get("氏名")
             if not name or clean(name) in ("計", "合計"):
                 continue
+            key = (clean(name), clean(get("生年月日")))
+            if key in seen:
+                continue
+            seen.add(key)
             out.append({"役職名": get("役職名"), "氏名": name,
                         "生年月日": get("生年月日"), "任期": get("任期"),
                         "所有株式数": num(get("所有株式数")), "単位": unit,

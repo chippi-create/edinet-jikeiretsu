@@ -211,6 +211,42 @@ def text_of(html):
     return p.text()
 
 
+# 有報の本文に出てくるURLのうち、会社と関係のないもの。
+# XBRLの名前空間やEDINET自身への参照が数百回出るので、これを除かないと埋もれる。
+SKIP_HOSTS = ("xbrl.org", "w3.org", "adobe.com", "microsoft.com", "ifrs.org",
+              "jpx.co.jp", "tse.or.jp", "sec.gov", "disclosure.site",
+              "google.com", "youtube.com", "twitter.com", "facebook.com")
+
+
+def site_host_of(z):
+    """有報の本文から、その会社のサイトらしいホストを1つ選ぶ。
+
+    XBRLに会社のURLという項目は無い。本文中のリンクから拾うしかないので、
+    技術的なホストと官公庁を除いて、いちばん多く出てくるものを採る。
+    IR配信サービス（xxx.disclosure.site）も会社のサイトではないので除く。
+    確実な方法ではないため、出現回数も一緒に返して後から検証できるようにする。
+    """
+    import collections
+    c = collections.Counter()
+    for n in z.namelist():
+        if not (n.endswith(".htm") and "/PublicDoc/" in n):
+            continue
+        body = z.read(n).decode("utf-8", "replace")
+        for m in re.finditer(r"https?://([A-Za-z0-9.\-]+)", body):
+            h = m.group(1).lower().strip(".")
+            if not h or "." not in h:
+                continue
+            if h.endswith(".go.jp") or h.endswith(".lg.jp"):
+                continue
+            if any(h == s or h.endswith("." + s) for s in SKIP_HOSTS):
+                continue
+            c[h] += 1
+    if not c:
+        return "", 0
+    host, n = c.most_common(1)[0]
+    return host, n
+
+
 def sections_of(z):
     """ZIP内のiXBRLから、対象3つのHTMLを取り出す。"""
     out = {}

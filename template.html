@@ -341,6 +341,20 @@ function sourceLink(label){
     + esc(label) + '</a>';
 }
 
+// 会社サイトは有報の本文中のリンクから推定したもの。EDINETに項目として
+// 用意されていないため、断定せず「有報に記載のURL」として出す。
+function siteHost(){
+  const w = current.s && current.s.web;
+  return (w && w.length && w[0][0]) ? w[0][0] : '';
+}
+
+function siteLink(label){
+  const h = siteHost();
+  if (!h) return '';
+  return '<a class="src" target="_blank" rel="noopener noreferrer" href="https://'
+    + encodeURI(h) + '/">' + esc(label) + '</a>';
+}
+
 function proseBody(key){
   const s = current.s || {};
   const rows = s[key] || [];
@@ -377,8 +391,14 @@ function sourceBody(){
   const s = current.s || {};
   if (!s.d) return '<p class="empty">まだ取得していません</p>';
   const url = 'https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?' + encodeURIComponent(s.d);
+  const host = siteHost();
   return '<p><a class="btn" target="_blank" rel="noopener noreferrer" href="' + url + '">'
        + 'EDINETで有価証券報告書の原本を開く</a></p>'
+    + (host ? '<p class="note">この会社のサイト：'
+        + '<a class="src" target="_blank" rel="noopener noreferrer" href="https://'
+        + encodeURI(host) + '/">' + esc(host) + '</a><br>'
+        + '有価証券報告書の本文に出てくるURLから推定したものです。'
+        + 'EDINETに会社のURLという項目が無いため、確実ではありません。</p>' : '')
     + '<div class="prose">'
     + '<p>本サイトは有価証券報告書から機械的に抜き出した項目だけを表示しています。'
     + '次のものは原本にしかありません。</p>'
@@ -478,6 +498,8 @@ function render(){
   meta.textContent = code + '／' + c.e + '／' + c.k;
   const link = sourceLink('EDINETの原本');
   if (link) meta.insertAdjacentHTML('beforeend', '　' + link);
+  const site = siteLink('会社サイト');
+  if (site) meta.insertAdjacentHTML('beforeend', '　' + site);
 
   renderTabs();
   document.getElementById('tabbody').innerHTML =

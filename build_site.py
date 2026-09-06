@@ -27,6 +27,7 @@ TPL_PATH = os.path.join(HERE, "template.html")
 SECTION_FILES = {
     "biz": (os.path.join(HERE, "data", "business.csv"), ["本文"]),
     "div": (os.path.join(HERE, "data", "dividend.csv"), ["本文"]),
+    "web": (os.path.join(HERE, "data", "websites.csv"), ["ホスト"]),
     "own": (os.path.join(HERE, "data", "ownership.csv"),
             ["区分", "株主数", "所有株式数_単元", "割合"]),
     "sh": (os.path.join(HERE, "data", "shareholders.csv"),

@@ -40,12 +40,16 @@ RISK_DIR = os.path.join(DATA_DIR, "risks")
 # 役員の略歴も同じ理由で会社ごとに分ける。1人あたり数百字あり、
 # 全社ぶんを officers.csv に入れると30MB近くなって毎日書き換わる。
 BIO_DIR = os.path.join(DATA_DIR, "bios")
+WEBSITES = os.path.join(DATA_DIR, "websites.csv")
 
 F_OWN = ["証券コード", "会社名", "基準日", "区分", "株主数", "所有株式数_単元", "割合"]
 F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]
 F_OF = ["証券コード", "会社名", "基準日", "役職名", "氏名", "生年月日", "任期", "所有株式数", "単位"]
 F_BIZ = ["証券コード", "会社名", "基準日", "本文"]
 F_DIV = ["証券コード", "会社名", "基準日", "本文"]
+# 会社サイトは有報の本文中のリンクから推定したもの。確実ではないので
+# 出現回数も残して、あとから怪しいものを洗い出せるようにする。
+F_WEB = ["証券コード", "会社名", "ホスト", "出現回数"]
 
 
 def log(*a):
@@ -235,6 +239,7 @@ def main():
     of = load_rows(OFFICERS)
     biz = load_rows(BUSINESS)
     div = load_rows(DIVIDEND)
+    web = load_rows(WEBSITES)
     nrisk = len(os.listdir(RISK_DIR)) if os.path.isdir(RISK_DIR) else 0
     nbio = len(os.listdir(BIO_DIR)) if os.path.isdir(BIO_DIR) else 0
     log(f"■ 略歴 {nbio}社")
@@ -266,6 +271,10 @@ def main():
         # 事業の内容は表ではなく文章。段落の区切りを残して取り出す。
         btxt = sections.text_of(blocks.get("DescriptionOfBusinessTextBlock", ""))
         biz[sec] = [{"証券コード": sec, "会社名": name, "基準日": kijun, "本文": btxt}] if btxt else []
+
+        host, hits = sections.site_host_of(z)
+        web[sec] = [{"証券コード": sec, "会社名": name, "ホスト": host,
+                     "出現回数": hits}] if host else []
 
         dtxt = sections.text_of(blocks.get("DividendPolicyTextBlock", ""))
         div[sec] = [{"証券コード": sec, "会社名": name, "基準日": kijun, "本文": dtxt}] if dtxt else []
@@ -306,18 +315,18 @@ def main():
         elif os.path.exists(bpath):
             os.remove(bpath)
 
-        log(f"  {sec} {name}: 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
+        log(f"  {sec} {name}: {host or 'サイト不明'} / 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
             f"/ 所有者別{len(own[sec])}区分 / 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")
         done += 1
         if done % 25 == 0:
-            save_all(own, sh, of, biz, div, state)
+            save_all(own, sh, of, biz, div, web, state)
             log(f"   （途中保存：{done}社）")
 
         state[sec] = {"docID": doc["docID"],
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
-    n = save_all(own, sh, of, biz, div, state)
+    n = save_all(own, sh, of, biz, div, web, state)
     log("")
     log(f"■ 今回の取得: {done}社")
     nrisk = len(os.listdir(RISK_DIR)) if os.path.isdir(RISK_DIR) else 0
@@ -330,12 +339,13 @@ def main():
         log(f"■ 取得できなかった会社: {failed}")
 
 
-def save_all(own, sh, of, biz, div, state):
+def save_all(own, sh, of, biz, div, web, state):
     a = save_rows(OWNERSHIP, F_OWN, own)
     b = save_rows(SHAREHOLDERS, F_SH, sh)
     c = save_rows(OFFICERS, F_OF, of)
     d = save_rows(BUSINESS, F_BIZ, biz)
     e = save_rows(DIVIDEND, F_DIV, div)
+    save_rows(WEBSITES, F_WEB, web)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=1, sort_keys=True)
     return a, b, c, d, e

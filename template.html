@@ -270,9 +270,9 @@ function openCompany(code){
     loadSections(code).then(function(all){
       if (!current || current.code !== code) return;
       current.s = (all && all[code]) || null;
-      // 読み込みが終わるまでタブは押せないが、開いている会社が変わっていなければ
-      // 中身ごと描き直しておく。
-      if (currentTab === '財務') renderTabs(); else render();
+      // 必ず全部描き直す。タブの有効無効だけ更新していたら、財務タブを見ている間は
+      // 見出しのEDINET原本と会社サイトのリンクが出ないままだった。
+      render();
     });
   });
 }

@@ -25,6 +25,7 @@ TPL_PATH = os.path.join(HERE, "template.html")
 # 記述部分。財務とは別のファイルに分けて、タブを開いたときだけ読み込む。
 # 一緒にすると会社を選んだ時点の読み込みが重くなる。
 SECTION_FILES = {
+    "biz": (os.path.join(HERE, "data", "business.csv"), ["本文"]),
     "own": (os.path.join(HERE, "data", "ownership.csv"),
             ["区分", "株主数", "所有株式数_単元", "割合"]),
     "sh": (os.path.join(HERE, "data", "shareholders.csv"),

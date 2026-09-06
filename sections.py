@@ -22,10 +22,14 @@ import fetch2
 
 # 取り出す対象。要素名 -> ラベル
 TARGETS = {
+    "DescriptionOfBusinessTextBlock": "事業の内容",
     "ShareholdingByShareholderCategoryTextBlock": "所有者別状況",
     "MajorShareholdersTextBlock": "大株主の状況",
     "InformationAboutOfficersTextBlock": "役員の状況",
 }
+
+# 表ではなく文章として読むもの。段落の区切りを残す必要がある。
+PROSE = {"DescriptionOfBusinessTextBlock"}
 
 
 def log(*a):
@@ -161,6 +165,49 @@ def tables_of(html):
     return p.tables
 
 
+class TextParser(HTMLParser):
+    """文章として読む部分を、段落の区切りを残したまま取り出す。
+
+    CSV(type=5)のTextBlockはタグごと落とされて一続きの文字列になり、
+    どこで段落が変わるか分からなくなる。ここではブロック要素で改行を入れる。
+    """
+
+    BLOCK = ("p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table")
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.buf = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.BLOCK:
+            self.buf.append("\n")
+        elif tag == "br":
+            self.buf.append("\n")
+        elif tag in ("td", "th"):
+            self.buf.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag in self.BLOCK:
+            self.buf.append("\n")
+
+    def handle_data(self, data):
+        self.buf.append(data)
+
+    def text(self):
+        s = "".join(self.buf).replace("　", " ")
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r" *\n *", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip()
+
+
+def text_of(html):
+    p = TextParser()
+    p.feed(html or "")
+    p.close()
+    return p.text()
+
+
 def sections_of(z):
     """ZIP内のiXBRLから、対象3つのHTMLを取り出す。"""
     out = {}
@@ -202,6 +249,12 @@ def main():
             html = blocks.get(element)
             if not html:
                 log(f"\n  --- {label}: 見つかりません ---")
+                continue
+            if element in PROSE:
+                t = text_of(html)
+                log(f"\n  --- {label}（{len(t):,}字）---")
+                for line in t.split("\n")[:int(os.environ.get("ROWS", "8"))]:
+                    log("      " + line[:90])
                 continue
             tabs = tables_of(html)
             log(f"\n  --- {label}（表 {len(tabs)}個 / HTML {len(html):,}字）---")

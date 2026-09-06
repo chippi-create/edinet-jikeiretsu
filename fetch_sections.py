@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-fetch_sections.py — 所有者別状況・大株主の状況・役員の状況を集める
+fetch_sections.py — 事業の内容・所有者別状況・大株主の状況・役員の状況を集める
 
   LIMIT=300 python fetch_sections.py
 
-提出本文書(type=1)のZIPからHTMLの表を取り出して、3つのCSVに貯める。
-fetch2.py と同じく、索引の書類構成が変わった会社だけを取り直す。
+提出本文書(type=1)のZIPからHTMLを取り出してCSVに貯める。3つは表として、
+事業の内容は文章として扱う。fetch2.py と同じく、索引の書類構成が
+変わった会社だけを取り直す。
 
 これらは「その時点の断面」しか有報に載らないので、財務指標のように
 1回で5年分は取れない。毎年の有報を積み上げることで時系列になる。
@@ -28,10 +29,12 @@ LIMIT = int(os.environ.get("LIMIT", "300"))
 OWNERSHIP = os.path.join(DATA_DIR, "ownership.csv")
 SHAREHOLDERS = os.path.join(DATA_DIR, "shareholders.csv")
 OFFICERS = os.path.join(DATA_DIR, "officers.csv")
+BUSINESS = os.path.join(DATA_DIR, "business.csv")
 
 F_OWN = ["証券コード", "会社名", "基準日", "区分", "株主数", "所有株式数_単元", "割合"]
 F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]
 F_OF = ["証券コード", "会社名", "基準日", "役職名", "氏名", "生年月日", "任期", "所有株式数", "単位"]
+F_BIZ = ["証券コード", "会社名", "基準日", "本文"]
 
 # 略歴はCSVに入れない。1人あたり数百字あり、3,800社ぶんでは巨大になって
 # 毎日の書き換えでGit履歴が膨らむため。必要になったら別ファイルにする。
@@ -204,7 +207,9 @@ def main():
     own = load_rows(OWNERSHIP)
     sh = load_rows(SHAREHOLDERS)
     of = load_rows(OFFICERS)
-    log(f"■ 蓄積の現状: 所有者別 {len(own)}社 / 大株主 {len(sh)}社 / 役員 {len(of)}社")
+    biz = load_rows(BUSINESS)
+    log(f"■ 蓄積の現状: 事業 {len(biz)}社 / 所有者別 {len(own)}社 "
+        f"/ 大株主 {len(sh)}社 / 役員 {len(of)}社")
 
     picked = fetch2.pick_docs(index, quiet=True)
     pending = [s for s in sorted(picked)
@@ -228,6 +233,10 @@ def main():
             continue
         blocks = sections.sections_of(z)
 
+        # 事業の内容は表ではなく文章。段落の区切りを残して取り出す。
+        btxt = sections.text_of(blocks.get("DescriptionOfBusinessTextBlock", ""))
+        biz[sec] = [{"証券コード": sec, "会社名": name, "基準日": kijun, "本文": btxt}] if btxt else []
+
         o = parse_ownership(sections.tables_of(
             blocks.get("ShareholdingByShareholderCategoryTextBlock", "")))
         own[sec] = [{"証券コード": sec, "会社名": name, "基準日": kijun, "区分": k,
@@ -244,20 +253,21 @@ def main():
         of[sec] = [dict(r, 証券コード=sec, 会社名=name,
                         基準日=(doc.get("submitDateTime") or "")[:10]) for r in f]
 
-        log(f"  {sec} {name}: 所有者別{len(own[sec])}区分 / 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")
+        log(f"  {sec} {name}: 事業{len(btxt)}字 / 所有者別{len(own[sec])}区分 "
+            f"/ 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")
         done += 1
         if done % 25 == 0:
-            save_all(own, sh, of, state)
+            save_all(own, sh, of, biz, state)
             log(f"   （途中保存：{done}社）")
 
         state[sec] = {"docID": doc["docID"],
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
-    n = save_all(own, sh, of, state)
+    n = save_all(own, sh, of, biz, state)
     log("")
     log(f"■ 今回の取得: {done}社")
-    log(f"■ 蓄積の合計: 所有者別 {n[0]}行 / 大株主 {n[1]}行 / 役員 {n[2]}行")
+    log(f"■ 蓄積の合計: 所有者別 {n[0]}行 / 大株主 {n[1]}行 / 役員 {n[2]}行 / 事業 {n[3]}社")
     remain = len(pending) - done
     if remain > 0:
         log(f"■ 残り {remain}社。次回の実行で続きから取得します。")
@@ -265,13 +275,14 @@ def main():
         log(f"■ 取得できなかった会社: {failed}")
 
 
-def save_all(own, sh, of, state):
+def save_all(own, sh, of, biz, state):
     a = save_rows(OWNERSHIP, F_OWN, own)
     b = save_rows(SHAREHOLDERS, F_SH, sh)
     c = save_rows(OFFICERS, F_OF, of)
+    d = save_rows(BUSINESS, F_BIZ, biz)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=1, sort_keys=True)
-    return a, b, c
+    return a, b, c, d
 
 
 if __name__ == "__main__":

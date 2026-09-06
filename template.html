@@ -48,6 +48,8 @@ th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
 .tab.on{color:var(--accent); border-bottom-color:var(--accent); font-weight:600}
 .tab:disabled{color:#C2CAD6; cursor:default}
 .sech{font-size:13px; margin:18px 0 6px; font-weight:600}
+.prose{max-width:44em}
+.prose p{margin:0 0 12px; line-height:1.9}
 thead th{background:var(--paper); font-size:12px; color:var(--mute)}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--paper)}
@@ -236,6 +238,7 @@ function openCompany(code){
 
 const TABS = [
   ['財務', null],
+  ['事業', 'biz'],
   ['株主', 'sh'],
   ['役員', 'of'],
 ];
@@ -295,6 +298,19 @@ function financeBody(){
     + '行をタップするとグラフが切り替わります。「※」は制度上2年分しか取得できない指標です。</p>';
 }
 
+function businessBody(){
+  const s = current.s || {};
+  const rows = s.biz || [];
+  if (!rows.length || !rows[0][0]) return '<p class="empty">まだ取得していません</p>';
+  let out = '';
+  if (s.k && s.k.biz) out += '<p class="dmeta">' + esc(s.k.biz) + ' 現在</p>';
+  // 有報の本文をそのまま出す。段落は取得時に改行として残してある。
+  out += '<div class="prose">' + rows[0][0].split('\n')
+    .filter(function(x){ return x.trim(); })
+    .map(function(x){ return '<p>' + esc(x) + '</p>'; }).join('') + '</div>';
+  return out;
+}
+
 function shareholderBody(){
   const s = current.s || {};
   let out = '';
@@ -341,7 +357,8 @@ function render(){
 
   renderTabs();
   document.getElementById('tabbody').innerHTML =
-      currentTab === '株主' ? shareholderBody()
+      currentTab === '事業' ? businessBody()
+    : currentTab === '株主' ? shareholderBody()
     : currentTab === '役員' ? officerBody()
     : financeBody();
 

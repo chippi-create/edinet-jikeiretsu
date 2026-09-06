@@ -230,8 +230,11 @@ function openCompany(code){
     window.scrollTo(0, 0);
     // 記述部分は開いた時点で先読みしておく。タブを押してから待たせない。
     loadSections(code).then(function(all){
+      if (!current || current.code !== code) return;
       current.s = (all && all[code]) || null;
-      if (current.code === code) renderTabs();
+      // 読み込みが終わるまでタブは押せないが、開いている会社が変わっていなければ
+      // 中身ごと描き直しておく。
+      if (currentTab === '財務') renderTabs(); else render();
     });
   });
 }

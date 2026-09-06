@@ -69,27 +69,41 @@ jobs:
       - name: build site
         run: python build_site.py
 
+      # 生成物を退避してから、リモートの最新に合わせて置き直す。
+      #
+      # 以前は commit してから rebase していたが、こちらが data/ を書いている間に
+      # 手作業で同じファイルを消すと modify/delete の衝突になり、-X theirs でも
+      # 解決できずに日次実行が落ちた。内容の衝突しか解決できないため。
+      # rebase をやめれば衝突という概念自体が無くなる。
+      #
+      # docs_index.json / data / site は生成物なので、常に今回作ったものを採る。
+      # それ以外（コードやREADME）はリモートの最新をそのまま使う。
       - name: commit
         if: always()
         run: |
           git config user.name "edinet-bot"
           git config user.email "edinet-bot@users.noreply.github.com"
-          git add docs_index.json data site
-          if git diff --staged --quiet; then
-            echo "変更はありません"
-            exit 0
-          fi
-          git commit -m "edinet: $(date -u +%Y-%m-%d)"
-          # data/ と site/ は生成物なので、衝突したら今回作ったものを採る。
-          # 手作業のpushと重なっても止まらないようにする。
+
+          tmp=$(mktemp -d)
+          cp docs_index.json "$tmp/docs_index.json"
+          mkdir -p "$tmp/data" "$tmp/site"
+          rsync -a --delete data/ "$tmp/data/"
+          rsync -a --delete site/ "$tmp/site/"
+
           for i in 1 2 3; do
             git fetch -q origin main
-            if git rebase -X theirs origin/main; then
-              if git push; then
-                exit 0
-              fi
-            else
-              git rebase --abort || true
+            git reset -q --hard origin/main
+            cp "$tmp/docs_index.json" docs_index.json
+            rsync -a --delete "$tmp/data/" data/
+            rsync -a --delete "$tmp/site/" site/
+            git add -A docs_index.json data site
+            if git diff --staged --quiet; then
+              echo "変更はありません"
+              exit 0
+            fi
+            git commit -q -m "edinet: $(date -u +%Y-%m-%d)"
+            if git push origin HEAD:main; then
+              exit 0
             fi
             echo "push をやり直します（$i 回目）"
             sleep 10

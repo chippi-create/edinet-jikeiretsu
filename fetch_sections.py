@@ -159,9 +159,12 @@ def parse_officers(tabs):
 
     改ページで分割された表に同じ人が重ねて載っていることがあり、
     そのままつなぐと二重になる（ニッスイで31名が41行になっていた）。
-    氏名と生年月日が一致する行は最初のものだけ採る。
+    氏名と生年月日が一致する行はまとめる。
+
+    ただし先に出た行を採るだけでは駄目で、略歴の列が無い表に先に載っている人が
+    略歴を失う。空いている項目は後から出てきた行で埋める。
     """
-    out, seen = [], set()
+    out, seen = [], {}
     for t in tabs:
         if not t:
             continue
@@ -182,14 +185,19 @@ def parse_officers(tabs):
             name = get("氏名")
             if not name or clean(name) in ("計", "合計"):
                 continue
+            rec = {"役職名": get("役職名"), "氏名": name,
+                   "生年月日": get("生年月日"), "任期": get("任期"),
+                   "所有株式数": num(get("所有株式数")), "単位": unit,
+                   "略歴": get("略歴")}
             key = (clean(name), clean(get("生年月日")))
             if key in seen:
+                have = seen[key]
+                for k, v in rec.items():
+                    if v and not have.get(k):
+                        have[k] = v
                 continue
-            seen.add(key)
-            out.append({"役職名": get("役職名"), "氏名": name,
-                        "生年月日": get("生年月日"), "任期": get("任期"),
-                        "所有株式数": num(get("所有株式数")), "単位": unit,
-                        "略歴": get("略歴")})
+            seen[key] = rec
+            out.append(rec)
     return out
 
 

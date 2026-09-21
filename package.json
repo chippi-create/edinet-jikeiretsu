@@ -1,0 +1,10 @@
+{
+  "name": "edinet-jikeiretsu",
+  "private": true,
+  "type": "module",
+  "description": "Netlify Functions の依存だけ。サイト本体は build_site.py が生成する静的ファイル。",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@netlify/blobs": "^10.0.0"
+  }
+}

@@ -7,7 +7,7 @@ name: edinet daily
 # 生成物を書くジョブは1つだけにする。
 #
 # 一度に全社は取らない（EDINETに短時間で大量アクセスしないため）。
-# 約3,800社を財務は7日、記述部分は13日かけて一巡し、
+# 約3,800社を7日かけて一巡し、
 # 以降は新しい報告書が出た会社だけが対象になる。
 on:
   schedule:
@@ -22,7 +22,7 @@ on:
         default: "600"
       sections_limit:
         description: "記述部分を1回で処理する会社数（ZIPが大きいので少なめ）"
-        default: "300"
+        default: "600"
 
 permissions:
   contents: write
@@ -67,7 +67,7 @@ jobs:
         run: python fetch_sections.py
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
-          LIMIT: ${{ inputs.sections_limit || '300' }}
+          LIMIT: ${{ inputs.sections_limit || '600' }}
 
       - name: build site
         run: python build_site.py

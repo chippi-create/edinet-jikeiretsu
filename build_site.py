@@ -28,6 +28,8 @@ SECTION_FILES = {
     "biz": (os.path.join(HERE, "data", "business.csv"), ["本文"]),
     "div": (os.path.join(HERE, "data", "dividend.csv"), ["本文"]),
     "web": (os.path.join(HERE, "data", "websites.csv"), ["ホスト"]),
+    "seg": (os.path.join(HERE, "data", "segments.csv"),
+            ["セグメント", "外部顧客への売上高", "セグメント利益", "単位"]),
     "own": (os.path.join(HERE, "data", "ownership.csv"),
             ["区分", "株主数", "所有株式数_単元", "割合"]),
     "sh": (os.path.join(HERE, "data", "shareholders.csv"),
@@ -168,6 +170,8 @@ def main():
     has_risk = copy_per_company("risks", "risk", ".txt")
     # 役員の略歴も同じ扱い。役員のタブを開いたときだけ取りに行く。
     has_bio = copy_per_company("bios", "bio", ".json")
+    # 要約を作るときだけ読む材料。サイトの表示には使わない。
+    copy_per_company("context", "context", ".json")
 
     # 記述部分は別ファイル。タブを開いたときだけ取りに行く。
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)

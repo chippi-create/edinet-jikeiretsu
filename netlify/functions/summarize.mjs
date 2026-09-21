@@ -16,18 +16,27 @@ const MODEL = "claude-opus-5";
 const DAILY_LIMIT = Number(process.env.SUMMARY_DAILY_LIMIT || 5);
 
 const SYSTEM = `あなたは有価証券報告書を読み解く編集者です。
-「事業の内容」の記載から、その会社が何をやっている会社かを日本語で手短にまとめます。
+渡された記載から、その会社が何をやっている会社かを日本語でまとめます。
 
 出力の形式:
-1行目に60字以内の要約を書く。何を作り、誰に売っているかが分かるように書く。
-空行を1つ挟む。
-そのあとに事業の柱を「- 」で始まる箇条書きで3〜5個。各行は40字以内。
+
+【全体】
+60字以内で1行。何を作り、誰に売っているかが分かるように書く。
+
+【セグメント名】
+そのセグメントについて200〜300字。可能なかぎり次の順で書く。
+  何を仕入れ／調達しているか → どこでどう作っているか → 主にどこへ売っているか
+セグメントは渡された名前をそのまま見出しに使い、渡された順に全部書く。
 
 守ること:
-・記載されていないことは書かない。推測で補わない。
-・売上規模や将来性の評価、投資判断につながる表現は書かない。
+・**記載されていないことは絶対に書かない。** 推測で補わない。業界の一般論も書かない。
+・字数を満たすために内容を膨らませない。書けることが少なければ短くてよい。
+  仕入先や販売先が記載されていなければ「仕入先の記載はありません」のように書く。
+  200字に届かないことは失敗ではない。創作する方が失敗である。
+・売上高や利益の数字は書かない。別の表に出ているので重複させない。
+・将来性の評価、投資判断につながる表現、「有望」「好調」のような評価語は書かない。
 ・「〜と考えられます」のような曖昧な言い回しを使わない。記載どおりに書く。
-・見出しや前置き、末尾の感想は付けない。指定した形式だけを出力する。`;
+・前置きや末尾の感想は付けない。指定した形式だけを出力する。`;
 
 function badRequest(message, status = 400) {
   return new Response(JSON.stringify({ error: message }), {
@@ -60,6 +69,24 @@ export default async (req) => {
   const text = company?.biz?.[0]?.[0];
   if (!text) return badRequest("この会社は事業の内容がまだ取得できていません", 404);
 
+  // 事業の内容だけでは仕入先も販売先も書かれていないことが多い。
+  // 経営者による分析・主要な設備・主要な顧客を材料として足す。
+  let ctx = {};
+  try {
+    const cres = await fetch(`${url.origin}/context/${code}.json`);
+    if (cres.ok) ctx = await cres.json();
+  } catch { /* 材料が無ければ事業の内容だけで書く */ }
+
+  const segNames = (company.seg || []).map((r) => r[0]).filter(Boolean);
+  const material = [
+    `会社名: ${company.n || code}`,
+    segNames.length ? `報告セグメント: ${segNames.join("、")}` : "報告セグメント: 記載なし",
+    `\n■ 事業の内容\n${text}`,
+    ctx.analysis ? `\n■ 経営者による分析\n${ctx.analysis}` : "",
+    ctx.facilities ? `\n■ 主要な設備の状況\n${ctx.facilities}` : "",
+    ctx.customers ? `\n■ 主要な顧客ごとの情報\n${ctx.customers}` : "",
+  ].filter(Boolean).join("\n");
+
   // 1日の上限。保存済みを返す場合はここまで来ないので、課金するときだけ数える。
   const today = new Date().toISOString().slice(0, 10);
   const meta = getStore("summary-meta");
@@ -77,16 +104,16 @@ export default async (req) => {
   try {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 2000,
-      // 要約は難しい作業ではないので、深く考えさせずに速く返す。
-      output_config: { effort: "low" },
+      max_tokens: 8000,
+      // セグメントごとに書き分けるので、低すぎると雑になる。
+      output_config: { effort: "medium" },
       system: SYSTEM,
       messages: [
         {
           role: "user",
           content:
-            `会社名: ${company.n || code}\n\n` +
-            `以下は有価証券報告書の「事業の内容」です。\n\n${text}`,
+            "以下は有価証券報告書からの抜粋です。ここに書かれていることだけを使って" +
+            "まとめてください。\n\n" + material,
         },
       ],
     });

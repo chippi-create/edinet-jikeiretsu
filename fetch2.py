@@ -90,6 +90,33 @@ ITEMS = [
     ("従業員数",
      [r"^NumberOfEmployeesIFRSSummaryOfBusinessResults$", r"^NumberOfEmployees$"],
      [r"^NumberOfEmployees(JGAAP)?SummaryOfBusinessResults$", r"^NumberOfEmployees$"]),
+    # 時価総額を出すために使う。期末株価 = 株価収益率 × EPS。
+    # 有報に期末株価そのものの項目は無いので、これが期末時点に最も近い。
+    # 赤字の会社は株価収益率が載らないため取れない。
+    ("株価収益率", [r"^PriceEarningsRatioSummaryOfBusinessResults$"],
+     [r"^PriceEarningsRatioSummaryOfBusinessResults$"]),
+    ("現金及び預金", [r"^CashAndDeposits$"], [r"^CashAndDeposits$"]),
+    ("のれん", [r"^Goodwill(IFRS)?$"], [r"^Goodwill$"]),
+]
+
+# 提出会社（単体）だけから取る項目。
+#
+# 分配可能額は会社法461条の計算で、連結ではなく単体の貸借対照表で決まる。
+# 連結の数字で代用すると桁が変わるので、ここだけ単体を明示して取る。
+# 発行済株式総数も提出会社の主要な経営指標にしか載らない。
+SOLO_ITEMS = [
+    ("単体_発行済株式総数", [r"^TotalNumberOfIssuedSharesSummaryOfBusinessResults$"]),
+    ("単体_資本金", [r"^CapitalStock$"]),
+    ("単体_資本準備金", [r"^LegalCapitalSurplus$"]),
+    ("単体_その他資本剰余金", [r"^OtherCapitalSurplus$"]),
+    ("単体_資本剰余金合計", [r"^CapitalSurplus$"]),
+    ("単体_利益準備金", [r"^LegalRetainedEarnings$"]),
+    ("単体_繰越利益剰余金", [r"^RetainedEarningsBroughtForward$"]),
+    ("単体_利益剰余金合計", [r"^RetainedEarnings$"]),
+    ("単体_自己株式", [r"^TreasuryStock$"]),
+    ("単体_のれん", [r"^Goodwill$"]),
+    ("単体_繰延資産", [r"^DeferredAssets$"]),
+    ("単体_現金及び預金", [r"^CashAndDeposits$"]),
 ]
 
 NULLS = ("", "-", "－", "―", "NA")
@@ -200,6 +227,28 @@ def normalize(text):
             merged[y] = {"値": v, "基準": primary}
         if merged:
             data[label] = merged
+
+    # 単体の項目。連結を作っている会社では単体に _NonConsolidatedMember が付き、
+    # 連結を作っていない会社では素の文脈が単体を指す。付き方が逆になる。
+    solo = "単体" if meta["renketsu"] == "true" else "連結"
+    for label, pats in SOLO_ITEMS:
+        got = {}
+        for pat in pats:
+            for r in rows:
+                off, sc = parse_ctx(r["コンテキストID"])
+                if off is None or sc != solo:
+                    continue
+                if re.match(pat, r["要素ID"].split(":")[-1]) is None:
+                    continue
+                v = (r["値"] or "").strip()
+                if v in NULLS:
+                    continue
+                got[base - off] = v
+            if got:
+                break
+        if got:
+            data[label] = {y: {"値": v, "基準": "単体"} for y, v in got.items()}
+
     return meta, data
 
 

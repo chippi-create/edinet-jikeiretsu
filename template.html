@@ -61,6 +61,15 @@ th.l,td.l{text-align:left; font-variant-numeric:normal; white-space:normal}
 .btn:hover{opacity:.9}
 ul.plain{margin:0 0 12px; padding-left:1.3em}
 ul.plain li{margin:0 0 6px; line-height:1.8}
+.mini{font:inherit; font-size:13px; padding:8px 14px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--accent); background:#fff; color:var(--accent)}
+.mini:hover{background:#EAF2FB}
+.sumbox{max-width:44em; margin:0 0 18px; padding:14px 16px; border-radius:10px;
+  background:#F2F7FC; border:1px solid #D6E4F2}
+.sumbox.err{background:var(--warn-bg); border-color:#F5C6C2; color:var(--warn-ink); font-size:13px}
+.sumbox .lead1{margin:0 0 10px; font-weight:600; line-height:1.8}
+.sumbox ul.plain{margin:0}
+.aimark{margin:12px 0 0; font-size:11px; line-height:1.8; color:var(--mute)}
 tr.ofrow{cursor:pointer}
 .caret{color:var(--accent); font-size:10px; margin-left:6px}
 tr.biorow td{background:var(--paper); white-space:normal}
@@ -377,6 +386,46 @@ function siteLink(label){
     + encodeURI(h) + '/">' + esc(label) + '</a>';
 }
 
+// AIの要約。押されたときだけ作り、一度作ったら保存されて次からは即座に出る。
+const sumcache = {};
+
+function summaryBlock(){
+  const st = sumcache[current.code];
+  if (st && st.summary){
+    const lines = st.summary.split('\n').filter(function(x){ return x.trim(); });
+    const ps = lines.filter(function(x){ return !/^[-・]/.test(x); })
+      .map(function(x){ return '<p class="lead1">' + esc(x) + '</p>'; });
+    const lis = lines.filter(function(x){ return /^[-・]/.test(x); })
+      .map(function(x){ return '<li>' + esc(x.replace(/^[-・]\s*/, '')) + '</li>'; });
+    return '<div class="sumbox">' + ps.join('')
+      + (lis.length ? '<ul class="plain">' + lis.join('') + '</ul>' : '')
+      + '<p class="aimark">この要約はAI（' + esc(st.model || '') + '）が下の本文から作ったものです。'
+      + '有価証券報告書そのものの記載ではありません。正確な内容は本文と原本をご確認ください。</p>'
+      + '</div>';
+  }
+  if (st && st.error){
+    return '<div class="sumbox err">' + esc(st.error)
+      + ' <button class="mini" id="sumbtn">もう一度ためす</button></div>';
+  }
+  if (st && st.loading){
+    return '<div class="sumbox">要約を作っています…（10秒ほどかかります）</div>';
+  }
+  return '<p><button class="mini" id="sumbtn">AIで要約する</button></p>';
+}
+
+function runSummary(){
+  const code = current.code;
+  sumcache[code] = { loading: true };
+  render();
+  fetch('/api/summarize?code=' + encodeURIComponent(code))
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    .then(function(res){
+      sumcache[code] = res.ok ? res.j : { error: res.j.error || '要約に失敗しました' };
+    })
+    .catch(function(){ sumcache[code] = { error: '通信に失敗しました' }; })
+    .then(function(){ if (current && current.code === code) render(); });
+}
+
 function proseBody(key){
   const s = current.s || {};
   const rows = s[key] || [];
@@ -384,6 +433,7 @@ function proseBody(key){
   const text = rows[0][0];
   let out = '';
   if (s.k && s.k[key]) out += '<p class="dmeta">' + esc(s.k[key]) + ' 現在</p>';
+  if (key === 'biz') out += summaryBlock();
   out += prose(text);
   // 本文が図を指しているのに図が無い、という状態にしない。
   if (/系統図|図示|次のとおりであります。\s*$/.test(text)) {
@@ -541,7 +591,11 @@ function render(){
     document.querySelectorAll('#tabbody tbody tr').forEach(function(tr){
       if (tr.dataset.m) tr.onclick = function(){ currentMetric = tr.dataset.m; render(); };
     });
-  } else if (currentTab === '役員'){
+  }
+  const sb = document.getElementById('sumbtn');
+  if (sb) sb.onclick = runSummary;
+
+  if (currentTab === '役員'){
     document.querySelectorAll('#tabbody tr.ofrow').forEach(function(tr){
       const bio = document.querySelector('#tabbody tr.biorow[data-for="' + tr.dataset.i + '"]');
       if (!bio) return;

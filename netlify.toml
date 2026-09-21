@@ -2,3 +2,8 @@
 # Netlify側でのビルドは行わない。site/ をそのまま配信する。
 [build]
   publish = "site"
+
+# 事業の内容をAIで要約する関数。押されたときだけ動く。
+# ANTHROPIC_API_KEY はNetlifyの環境変数に置く（リポジトリには入れない）。
+[functions]
+  directory = "netlify/functions"

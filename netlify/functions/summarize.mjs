@@ -54,10 +54,14 @@ export default async (req) => {
     return badRequest("証券コードの形式が正しくありません");
   }
 
+  // refresh=1 で作り直せる。1日の上限は変わらないので最悪額は増えない。
+  const refresh = url.searchParams.get("refresh") === "1";
   const store = getStore("summaries");
-  const cached = await store.get(code, { type: "json" });
-  if (cached) {
-    return Response.json({ ...cached, cached: true });
+  if (!refresh) {
+    const cached = await store.get(code, { type: "json" });
+    if (cached) {
+      return Response.json({ ...cached, cached: true });
+    }
   }
 
   // 事業の内容はサイト自身が配信しているので、そこから読む。

@@ -2,7 +2,9 @@
 """
 fetch_sections.py — 有報の記述部分を集める
 
-  事業の内容 / 配当政策 / 事業等のリスク / 所有者別状況 / 大株主の状況 / 役員の状況
+  事業の内容 / セグメント情報 / 配当政策 / 事業等のリスク
+  所有者別状況 / 大株主の状況 / 役員の状況
+  （要約用の材料として 経営者による分析・主要な設備・主要な顧客も保存する）
 
   LIMIT=300 python fetch_sections.py
 
@@ -41,6 +43,10 @@ RISK_DIR = os.path.join(DATA_DIR, "risks")
 # 全社ぶんを officers.csv に入れると30MB近くなって毎日書き換わる。
 BIO_DIR = os.path.join(DATA_DIR, "bios")
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")
+SEGMENTS = os.path.join(DATA_DIR, "segments.csv")
+# 要約を書くための材料。事業の内容だけでは仕入や販売先が分からないので、
+# 経営者による分析・主要な設備・主要な顧客も渡す。1社1万字を超えるため会社ごとに分ける。
+CONTEXT_DIR = os.path.join(DATA_DIR, "context")
 
 F_OWN = ["証券コード", "会社名", "基準日", "区分", "株主数", "所有株式数_単元", "割合"]
 F_SH = ["証券コード", "会社名", "基準日", "順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合"]
@@ -50,6 +56,7 @@ F_DIV = ["証券コード", "会社名", "基準日", "本文"]
 # 会社サイトは有報の本文中のリンクから推定したもの。確実ではないので
 # 出現回数も残して、あとから怪しいものを洗い出せるようにする。
 F_WEB = ["証券コード", "会社名", "ホスト", "出現回数"]
+F_SEG = ["証券コード", "会社名", "基準日", "セグメント", "外部顧客への売上高", "セグメント利益", "単位"]
 
 
 def log(*a):
@@ -205,6 +212,57 @@ def parse_officers(tabs):
     return out
 
 
+def parse_segments(tabs):
+    """セグメント情報の表から、セグメントごとの外部売上高と利益を取る。
+
+    当期と前期の2つが載るので、後に出てくる当期の表を採る。
+    「計」「調整額」「連結財務諸表計上額」は個別のセグメントではないので、
+    そこに当たったら打ち切る。「その他」も報告セグメントではないため入らない。
+    """
+    best = ([], "")
+    for t in tabs:
+        sales = profit = None
+        for r in t:
+            if not r:
+                continue
+            head = clean(r[0])
+            if sales is None and head.startswith("外部顧客への売上"):
+                sales = r
+            elif profit is None and head.startswith("セグメント利益"):
+                profit = r
+        if sales is None or profit is None:
+            continue
+
+        # セグメント名の行は、売上高の行より上で、2列目に中身がある最後の行
+        i = t.index(sales)
+        names = None
+        for j in range(i - 1, -1, -1):
+            cand = t[j]
+            if len(cand) > 2 and clean(cand[1]) and "報告セグメント" not in clean(cand[1]):
+                names = cand
+                break
+        if names is None:
+            continue
+
+        unit = ""
+        for r in t[:3]:
+            m = re.search(r"単位[：:]\s*([^)）]+)", " ".join(r))
+            if m:
+                unit = m.group(1).strip()
+                break
+
+        out = []
+        for c in range(1, min(len(names), len(sales), len(profit))):
+            nm = clean(names[c])
+            if not nm or nm in ("計", "合計", "調整額") or nm.startswith("連結財務諸表"):
+                break
+            out.append({"セグメント": nm, "外部顧客への売上高": num(sales[c]),
+                        "セグメント利益": num(profit[c]), "単位": unit})
+        if out:
+            best = (out, unit)
+    return best[0]
+
+
 def load_rows(path, key="証券コード"):
     rows = {}
     if os.path.exists(path):
@@ -240,6 +298,7 @@ def main():
     biz = load_rows(BUSINESS)
     div = load_rows(DIVIDEND)
     web = load_rows(WEBSITES)
+    segs = load_rows(SEGMENTS)
     nrisk = len(os.listdir(RISK_DIR)) if os.path.isdir(RISK_DIR) else 0
     nbio = len(os.listdir(BIO_DIR)) if os.path.isdir(BIO_DIR) else 0
     log(f"■ 略歴 {nbio}社")
@@ -271,6 +330,25 @@ def main():
         # 事業の内容は表ではなく文章。段落の区切りを残して取り出す。
         btxt = sections.text_of(blocks.get("DescriptionOfBusinessTextBlock", ""))
         biz[sec] = [{"証券コード": sec, "会社名": name, "基準日": kijun, "本文": btxt}] if btxt else []
+
+        seg = parse_segments(sections.tables_of(
+            blocks.get("NotesSegmentInformationEtcConsolidatedFinancialStatementsTextBlock", "")))
+        segs[sec] = [dict(r, 証券コード=sec, 会社名=name, 基準日=kijun) for r in seg]
+
+        # 要約用の材料。サイトには出さず、要約を作るときだけ読む。
+        ctx = {
+            "analysis": sections.text_of(blocks.get(
+                "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock", "")),
+            "facilities": sections.text_of(blocks.get("MajorFacilitiesTextBlock", "")),
+            "customers": sections.text_of(blocks.get("InformationForEachOfMainCustomersTextBlock", "")),
+        }
+        os.makedirs(CONTEXT_DIR, exist_ok=True)
+        cpath = os.path.join(CONTEXT_DIR, f"{sec}.json")
+        if any(ctx.values()):
+            with open(cpath, "w", encoding="utf-8") as fp:
+                json.dump(ctx, fp, ensure_ascii=False, separators=(",", ":"))
+        elif os.path.exists(cpath):
+            os.remove(cpath)
 
         host, hits = sections.site_host_of(z)
         web[sec] = [{"証券コード": sec, "会社名": name, "ホスト": host,
@@ -315,18 +393,18 @@ def main():
         elif os.path.exists(bpath):
             os.remove(bpath)
 
-        log(f"  {sec} {name}: {host or 'サイト不明'} / 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
+        log(f"  {sec} {name}: {host or 'サイト不明'} / セグメント{len(seg)}件 / 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
             f"/ 所有者別{len(own[sec])}区分 / 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")
         done += 1
         if done % 25 == 0:
-            save_all(own, sh, of, biz, div, web, state)
+            save_all(own, sh, of, biz, div, web, segs, state)
             log(f"   （途中保存：{done}社）")
 
         state[sec] = {"docID": doc["docID"],
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
-    n = save_all(own, sh, of, biz, div, web, state)
+    n = save_all(own, sh, of, biz, div, web, segs, state)
     log("")
     log(f"■ 今回の取得: {done}社")
     nrisk = len(os.listdir(RISK_DIR)) if os.path.isdir(RISK_DIR) else 0
@@ -339,13 +417,14 @@ def main():
         log(f"■ 取得できなかった会社: {failed}")
 
 
-def save_all(own, sh, of, biz, div, web, state):
+def save_all(own, sh, of, biz, div, web, segs, state):
     a = save_rows(OWNERSHIP, F_OWN, own)
     b = save_rows(SHAREHOLDERS, F_SH, sh)
     c = save_rows(OFFICERS, F_OF, of)
     d = save_rows(BUSINESS, F_BIZ, biz)
     e = save_rows(DIVIDEND, F_DIV, div)
     save_rows(WEBSITES, F_WEB, web)
+    save_rows(SEGMENTS, F_SEG, segs)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=1, sort_keys=True)
     return a, b, c, d, e

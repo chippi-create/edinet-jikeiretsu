@@ -27,6 +27,7 @@ TARGETS = {
     "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock": "経営者による分析",
     "MajorFacilitiesTextBlock": "主要な設備",
     "InformationForEachOfMainCustomersTextBlock": "主要な顧客",
+    "ShareholdingsTextBlock": "株式の保有状況",
     "DividendPolicyTextBlock": "配当政策",
     "BusinessRisksTextBlock": "事業等のリスク",
     "ShareholdingByShareholderCategoryTextBlock": "所有者別状況",
@@ -37,7 +38,7 @@ TARGETS = {
 # 表ではなく文章として読むもの。段落の区切りを残す必要がある。
 PROSE = {"DescriptionOfBusinessTextBlock", "DividendPolicyTextBlock",
          "BusinessRisksTextBlock", "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock",
-         "MajorFacilitiesTextBlock"}
+         "MajorFacilitiesTextBlock", "ShareholdingsTextBlock"}
 
 
 def log(*a):

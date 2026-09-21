@@ -341,6 +341,8 @@ def main():
                 "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock", "")),
             "facilities": sections.text_of(blocks.get("MajorFacilitiesTextBlock", "")),
             "customers": sections.text_of(blocks.get("InformationForEachOfMainCustomersTextBlock", "")),
+            # 政策保有株式。売却提案のほか、資金余力の判断にも使う。
+            "shareholdings": sections.text_of(blocks.get("ShareholdingsTextBlock", "")),
         }
         os.makedirs(CONTEXT_DIR, exist_ok=True)
         cpath = os.path.join(CONTEXT_DIR, f"{sec}.json")

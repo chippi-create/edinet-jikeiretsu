@@ -160,6 +160,10 @@ SOLO_ITEMS = [
     ("単体_のれん", [r"^Goodwill$"]),
     ("単体_繰延資産", [r"^DeferredAssets$"]),
     ("単体_現金及び預金", [r"^CashAndDeposits$"]),
+    # 分配可能額は、この2つがマイナスのときその額も控除する（計算規則158条）。
+    ("単体_その他有価証券評価差額金",
+     [r"^ValuationDifferenceOnAvailableForSaleSecurities$"]),
+    ("単体_土地再評価差額金", [r"^RevaluationReserveForLand$"]),
     # 1株当たり配当額。連結を作る会社でも提出会社の文脈にしか載らない。
     ("1株当たり配当", [r"^DividendPaidPerShareSummaryOfBusinessResults$"]),
     ("中間配当", [r"^InterimDividendPaidPerShareSummaryOfBusinessResults$"]),

@@ -97,6 +97,49 @@ ITEMS = [
      [r"^PriceEarningsRatioSummaryOfBusinessResults$"]),
     ("現金及び預金", [r"^CashAndDeposits$"], [r"^CashAndDeposits$"]),
     ("のれん", [r"^Goodwill(IFRS)?$"], [r"^Goodwill$"]),
+
+    # ここから下は提案書の「主な経営指標」「調達シミュレーション」に使う項目。
+    # どれも実物のXBRLをprobeで確かめてから書いている。
+    ("現金及び現金同等物",
+     [r"^CashAndCashEquivalentsIFRSSummaryOfBusinessResults$"],
+     [r"^CashAndCashEquivalentsSummaryOfBusinessResults$"]),
+    # 1株当たり純資産。PBR = 株価 ÷ これ。
+    # IFRSの会社は主要な経営指標に載せないことがあり、その場合は取れない。
+    ("BPS",
+     [r"^EquityAttributableToOwnersOfParentPerShareIFRSSummaryOfBusinessResults$"],
+     [r"^NetAssetsPerShareSummaryOfBusinessResults$"]),
+    # 設備投資額。【設備の状況】の概要にあり、当期（会社により前期も）だけ。
+    ("設備投資",
+     [r"^CapitalExpendituresIFRS$",
+      r"^CapitalExpendituresOverviewOfCapitalExpendituresEtc$"],
+     [r"^CapitalExpendituresOverviewOfCapitalExpendituresEtc$"]),
+    # 研究開発費。【研究開発活動】の総額。当期のみ。
+    # 販管費明細のResearchAndDevelopmentExpensesSGAは一部しか含まないので使わない。
+    ("研究開発費",
+     [r"^ResearchAndDevelopmentExpensesResearchAndDevelopmentActivities$"],
+     [r"^ResearchAndDevelopmentExpensesResearchAndDevelopmentActivities$"]),
+
+    # 有利子負債。合計は出さず、内訳のまま溜める。
+    # 会社によって無い科目があり、足し合わせは使う側で決める。
+    # IFRSの連結は科目名が違う（借入金をまとめて計上する）ため取れない。
+    ("短期借入金", [], [r"^ShortTermLoansPayable$"]),
+    ("長期借入金", [], [r"^LongTermLoansPayable$"]),
+    ("1年内返済長期借入金", [], [r"^CurrentPortionOfLongTermLoansPayable$"]),
+    ("社債", [], [r"^BondsPayable$"]),
+    ("コマーシャルペーパー", [], [r"^CommercialPapersLiabilities$"]),
+
+    # 【議決権の状況】から。当期のみ。
+    # 希薄化率の分母は発行済株式数ではなく議決権株式数なので、これが要る。
+    # 議決権株式数 = 議決権の個数 × 単元株式数（上場会社は100）。
+    ("発行済株式数",
+     [r"^NumberOfSharesIssuedSharesVotingRights$"],
+     [r"^NumberOfSharesIssuedSharesVotingRights$"]),
+    ("議決権の個数",
+     [r"^NumberOfVotingRightsIssuedSharesVotingRights$"],
+     [r"^NumberOfVotingRightsIssuedSharesVotingRights$"]),
+    ("自己株式数",
+     [r"^TotalNumberOfSharesHeldTreasurySharesEtc$"],
+     [r"^TotalNumberOfSharesHeldTreasurySharesEtc$"]),
 ]
 
 # 提出会社（単体）だけから取る項目。
@@ -117,6 +160,9 @@ SOLO_ITEMS = [
     ("単体_のれん", [r"^Goodwill$"]),
     ("単体_繰延資産", [r"^DeferredAssets$"]),
     ("単体_現金及び預金", [r"^CashAndDeposits$"]),
+    # 1株当たり配当額。連結を作る会社でも提出会社の文脈にしか載らない。
+    ("1株当たり配当", [r"^DividendPaidPerShareSummaryOfBusinessResults$"]),
+    ("中間配当", [r"^InterimDividendPaidPerShareSummaryOfBusinessResults$"]),
 ]
 
 NULLS = ("", "-", "－", "―", "NA")

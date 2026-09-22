@@ -1,5 +1,7 @@
 name: edinet-index
 
+# 索引だけを作り直す。普段は daily の中で直近30日ぶんが更新されるので、
+# こちらは範囲を指定して過去を取り込むときだけ手で動かす。
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +14,18 @@ on:
       max_days:
         description: "1回で叩く日数の上限"
         default: "260"
+      redo:
+        description: "1なら取得済みの日も叩き直す（拾う書類の種類を増やしたとき用）"
+        default: "0"
 
 permissions:
   contents: write
+
+# daily と同じグループにして、生成物を書くジョブが同時に走らないようにする。
+# 以前、索引と日次が同時に動いて docs_index.json が衝突し push できなくなった。
+concurrency:
+  group: edinet-daily
+  cancel-in-progress: false
 
 jobs:
   index:
@@ -36,12 +47,34 @@ jobs:
           START: ${{ inputs.start }}
           END: ${{ inputs.end }}
           MAX_DAYS: ${{ inputs.max_days }}
+          REDO: ${{ inputs.redo }}
 
+      # 索引は生成物なので、今回作ったものを採る。
+      # 単純な push だと、走っている間にリモートが進んでいたときに落ちる。
       - name: commit index
         if: always()
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add docs_index.json
-          git diff --staged --quiet || git commit -m "index: ${{ inputs.start }} - ${{ inputs.end }}"
-          git push
+          git config user.name "edinet-bot"
+          git config user.email "edinet-bot@users.noreply.github.com"
+
+          tmp=$(mktemp -d)
+          cp docs_index.json "$tmp/docs_index.json"
+
+          for i in 1 2 3; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            cp "$tmp/docs_index.json" docs_index.json
+            git add docs_index.json
+            if git diff --staged --quiet; then
+              echo "変更はありません"
+              exit 0
+            fi
+            git commit -q -m "index: ${{ inputs.start }} - ${{ inputs.end }}"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push をやり直します（$i 回目）"
+            sleep 10
+          done
+          echo "push に失敗しました" >&2
+          exit 1

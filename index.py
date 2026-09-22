@@ -2,7 +2,8 @@
 EDINET 書類索引づくり
 ・平日だけを巡回する（土日は必ず0件）
 ・一度取得した日は二度と叩かない（docs_index.json に記録）
-・有価証券報告書(120)と訂正有価証券報告書(130)だけを貯める
+・有価証券報告書(120)・訂正有価証券報告書(130)と、
+  大量保有報告書(350)・変更報告書(360)を貯める
 実行するたびに索引が育つ。企業の選択はこの索引を引くだけで済むようになる。
 """
 
@@ -24,11 +25,21 @@ MAX_DAYS = int(os.environ.get("MAX_DAYS", "260"))
 SLEEP = 4
 RETRY = 3
 INDEX_PATH = "docs_index.json"
-KEEP_TYPES = ("120", "130")
+# 120=有価証券報告書 130=訂正有価証券報告書
+# 350=大量保有報告書 360=変更報告書
+#
+# 大量保有報告書は「保有する側」が出すので、secCode は提出者のものになる。
+# どの会社についての報告かは issuerEdinetCode で分かるため、それも記録する。
+KEEP_TYPES = ("120", "130", "350", "360")
+
+# 1にすると、取得済みの日をもう一度叩き直す。
+# KEEP_TYPES を増やしたときに過去の日を取り直すためのもの。
+# 普段は0のまま（同じ日を何度も叩かない）。
+REDO = os.environ.get("REDO", "0") == "1"
 
 FIELDS = ("docID", "edinetCode", "secCode", "filerName", "docDescription",
           "docTypeCode", "periodStart", "periodEnd", "submitDateTime",
-          "csvFlag", "xbrlFlag")
+          "csvFlag", "xbrlFlag", "issuerEdinetCode", "subjectEdinetCode")
 
 
 def log(*a):
@@ -86,7 +97,7 @@ def main():
         key = d.isoformat()
         if d.weekday() >= 5:          # 土日
             skipped_weekend += 1
-        elif key in done:             # 取得済み
+        elif key in done and not REDO:   # 取得済み
             skipped_done += 1
         else:
             targets.append(d)
@@ -132,9 +143,9 @@ def main():
             docs[did] = rec
             n += 1
 
-        done[key] = {"全件": len(results), "有報": n}
+        done[key] = {"全件": len(results), "採用": n}
         added += n
-        log(f"  {key} 全{len(results):>5}件 / 有報{n:>4}件")
+        log(f"  {key} 全{len(results):>5}件 / 採用{n:>4}件")
 
         # 途中で落ちても失わないよう、こまめに書き出す
         if len(done) % 20 == 0:

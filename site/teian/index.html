@@ -392,6 +392,9 @@ $("go").onclick = () => {
     floorRatio: n($("floor").value) ? n($("floor").value) / 100 : null,
     years: n($("years").value) || null,
   };
+  // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
+  // 入口ごとに呼ぶと漏れるので、組み立てる直前に必ず読み直す。
+  readTanshin(true);
   pages = buildProposal(ctx);
   render();
   // 資料は入っているのに下書きをしていないと、文章に反映されない。
@@ -590,7 +593,7 @@ ${j.text}`);
  * 短信にしかないので、ここで拾って表に入れる。
  * 数字は取り違えが怖いのでAIには渡さず、機械的に当てる。
  */
-function readTanshin() {
+function readTanshin(quiet) {
   if (!ctx) return;
   ctx.tanshin = parseTanshin($("material").value) || null;
   const el = $("tanshinmsg");
@@ -599,9 +602,9 @@ function readTanshin() {
     : ($("material").value.trim()
         ? "資料は入っていますが、決算短信の数字は読み取れませんでした（説明資料や中計だけの場合はこうなります）。"
         : "");
-  if (pages) $("go").click();
+  if (!quiet && pages) $("go").click();
 }
-$("material").addEventListener("change", readTanshin);
+$("material").addEventListener("change", () => readTanshin(false));
 
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。

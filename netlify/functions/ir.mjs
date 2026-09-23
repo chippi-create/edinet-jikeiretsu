@@ -265,6 +265,26 @@ function fromJSON(text) {
  */
 const EIR_CATS = { press: 5, ir_material: 6, yuho: 3, meeting: 2 };
 
+/**
+ * 証券コードだけで当てにいく配信元のURL。
+ *
+ * 会社のページをたどらなくても、ここに当たれば資料が全部取れる。
+ * 実測では8社中2社が当たった（7794、4893）。
+ * とくに4893は会社のサイトすら分からない会社で、これ以外に手が無かった。
+ *
+ * パスの大文字小文字は会社によって違う（EIR と eir の両方が実在する）。
+ * サーバーが区別するので、両方あたる。
+ */
+function eirSeeds(code) {
+  const out = [];
+  for (const dir of ["eir", "EIR"]) {
+    const b = `https://ssl4.eir-parts.net/V4Public/${dir}/${code}/ja`;
+    out.push(`${b}/announcement/announcement_0.js`);
+    out.push(`${b}/press/press_2.js`);
+  }
+  return out;
+}
+
 function eirSiblings(url) {
   const m = /^(https?:\/\/[^\/]+\/V4Public\/EIR\/[^\/]+\/[a-z]{2})\/[^\/]+\/[^\/]+\.js/i.exec(url);
   if (!m) return [];
@@ -359,7 +379,19 @@ export default async (req) => {
   // 会社のページ → IR用のJS → 配信元のJS、と3段までたどる。
   let queue = [{ url: start.toString(), depth: 0 }];
 
+  // 証券コードが分かっているなら、配信元を先に当たる。
+  // 当たれば会社のページをたどらずに済む。外れても4回叩くだけ。
+  const code = String(body.code || "").trim();
+  if (/^[0-9A-Za-z]{4}$/.test(code)) {
+    for (const u of eirSeeds(code)) queue.unshift({ url: u, depth: 0, sibling: true });
+  }
+
+  // URLを指定されていないときだけ、配信元で足りたら会社のページは見に行かない。
+  // 有報から拾ったサイトが間違っていることがあるので、無駄に叩かない。
+  const explicit = Boolean(body.url);
+
   while (queue.length && Date.now() < deadline) {
+    if (!explicit && docs.size >= 20 && !queue[0].sibling) break;
     const { url, depth } = queue.shift();
     if (visited.includes(url)) continue;
     const r = await get(url, MAX_HTML);

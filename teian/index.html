@@ -71,6 +71,11 @@
     width:100%; background:var(--field); color:var(--fg); border:1px solid var(--line2);
     border-radius:4px; padding:8px 10px; font:inherit; font-size:13px; line-height:1.6;
   }
+  .irbox { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:4px; padding:6px 10px; margin:8px 0; }
+  .irbox label { display:flex; gap:8px; align-items:baseline; font-size:13px; color:var(--fg); margin:2px 0; }
+  .irbox input[type=checkbox] { width:auto; }
+  .irbox .d { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .irbox .k { color:var(--muted); font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 4px; white-space:nowrap; }
   .draft { border:1px solid var(--line); border-radius:4px; padding:8px 12px; margin:8px 0; }
   .draft b { font-size:13px; }
   .draft p { margin:4px 0 6px; white-space:pre-line; font-size:14px; }
@@ -125,7 +130,16 @@
     送るのは会社の開示内容・数値と、検討している手法名（MSワラント）だけです。
     <b>証券会社名・部署名・割当先は送りません。</b>
   </p>
-  <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（任意）"></textarea>
+  <div class="row" style="margin-bottom:8px">
+    <div style="flex:1 1 320px">
+      <label for="irurl">IRページのURL（空欄なら有報から拾ったサイトを見ます）</label>
+      <input id="irurl" style="width:100%" placeholder="https://例.co.jp/ir/library/">
+    </div>
+    <div><button id="irfind" class="ghost">IR資料を探す</button></div>
+    <span id="irmsg" class="ok"></span>
+  </div>
+  <div id="irlist"></div>
+  <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（下のボタンで自動で入ります）"></textarea>
   <div class="row" style="margin-top:8px">
     <div><button id="ai" class="ghost">AIに下書きさせる</button></div>
     <div><label style="display:inline"><input type="checkbox" id="refresh" style="width:auto"> 作り直す</label></div>
@@ -314,6 +328,95 @@ async function copy(text, msgEl) {
 }
 
 $("copyall").onclick = () => copy(pages.map(pageText).join("\n\n"), $("gomsg"));
+
+// ---- IR資料を探して読み込む ----------------------------------------------
+// 決算短信・決算説明資料・中期経営計画はEDINETに無いので、会社のIRページから取る。
+// 押されたときだけ動く。取るのは選ばれたものだけ。
+
+let irDocs = [];
+// 提案の材料として効く順。これだけ最初からチェックを入れておく。
+const IR_PICK = ["決算短信", "決算説明資料", "中期経営計画"];
+
+$("irfind").onclick = async () => {
+  if (!ctx && !$("irurl").value.trim()) { alert("先に会社を読み込むか、URLを入れてください"); return; }
+  $("irfind").disabled = true;
+  $("irmsg").textContent = "IRページを見ています（10秒ほど）…";
+  try {
+    const res = await fetch(`${API}/api/ir`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "find", code: ctx?.code, url: $("irurl").value.trim() || undefined }),
+    });
+    const j = await res.json();
+    if (!res.ok) { $("irmsg").textContent = j.error || "探せませんでした"; return; }
+    irDocs = j.docs || [];
+    renderIR(j);
+  } catch {
+    $("irmsg").textContent = "IRページにつながりませんでした";
+  } finally {
+    $("irfind").disabled = false;
+  }
+};
+
+function renderIR(j) {
+  if (!irDocs.length) {
+    $("irlist").innerHTML = `<p class="note">資料が見つかりませんでした。` +
+      `IRページのURLを直接入れてみてください。</p>`;
+    $("irmsg").textContent = "";
+    return;
+  }
+  // 種類ごとにまとめ、新しいものから。効くものだけ最初からチェックする。
+  const groups = {};
+  irDocs.forEach((d, i) => { (groups[d.kind] ||= []).push({ ...d, i }); });
+  const order = [...IR_PICK, ...Object.keys(groups).filter((k) => !IR_PICK.includes(k))];
+
+  $("irlist").innerHTML = `<div class="irbox">` + order.filter((k) => groups[k]).map((k) => {
+    const rows = groups[k].slice(0, k === "適時開示" || k === "その他" ? 8 : 12);
+    return `<div style="margin:6px 0 2px;font-weight:600;font-size:12px">${esc(k)}（${groups[k].length}本）</div>` +
+      rows.map((d) => `<label><input type="checkbox" data-i="${d.i}"` +
+        `${IR_PICK.includes(k) && groups[k].indexOf(d) === 0 ? " checked" : ""}>` +
+        `<span class="d">${esc(d.date || "日付なし")}</span>` +
+        `<span>${esc(d.title)}</span>` +
+        (d.pages ? `<span class="k">${esc(d.pages)}p</span>` : "") + `</label>`).join("");
+  }).join("") + `</div>` +
+    `<div class="row"><div><button id="irload" class="ghost">選んだ資料を読み込む</button></div>` +
+    `<span id="irload2" class="ok"></span></div>` +
+    `<p class="note">たどったページ ${j.visited.length}件。` +
+    `PDFの本文を取り出して、下の欄に入れます。スライドの資料は図の中の数字が落ちます。</p>`;
+
+  $("irmsg").textContent = `${irDocs.length}本 見つかりました。`;
+  $("irload").onclick = loadIR;
+}
+
+async function loadIR() {
+  const picked = [...$("irlist").querySelectorAll("input:checked")].map((c) => irDocs[Number(c.dataset.i)]);
+  if (!picked.length) { $("irload2").textContent = "資料を選んでください"; return; }
+  $("irload").disabled = true;
+  const parts = [];
+  for (let n = 0; n < picked.length; n++) {
+    const d = picked[n];
+    $("irload2").textContent = `読み込んでいます… ${n + 1}/${picked.length}`;
+    try {
+      const res = await fetch(`${API}/api/ir`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "text", url: d.url }),
+      });
+      const j = await res.json();
+      if (!res.ok) { parts.push(`=== ${d.title} ===
+（読み込めませんでした: ${j.error}）`); continue; }
+      parts.push(`=== ${d.title}（${d.date || "日付なし"}） ===
+${j.text}`);
+    } catch {
+      parts.push(`=== ${d.title} ===
+（読み込めませんでした）`);
+    }
+  }
+  const now = $("material").value.trim();
+  const sep = "\n\n";
+  $("material").value = (now ? now + sep : "") + parts.join(sep);
+  $("irload2").textContent =
+    `${picked.length}本を読み込みました（${$("material").value.length.toLocaleString()}字）。`;
+  $("irload").disabled = false;
+}
 
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。

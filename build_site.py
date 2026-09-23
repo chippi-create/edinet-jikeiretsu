@@ -47,6 +47,14 @@ UNITS = {
 ORDER = ["売上高", "営業利益", "経常利益", "純利益", "営業CF",
          "総資産", "純資産", "自己資本比率", "ROE", "EPS", "従業員数"]
 
+# 表には出さないが、配信はする項目。希薄化率や調達額の試算に使う。
+# 帯のJSONに "x" として入れる。画面の表はORDERだけで作る。
+EXTRA = ["発行済株式数", "議決権の個数", "自己株式数", "単体_発行済株式総数",
+         "BPS", "1株当たり配当", "株価収益率",
+         "現金及び現金同等物", "設備投資", "研究開発費",
+         "短期借入金", "長期借入金", "1年内返済長期借入金", "社債",
+         "コマーシャルペーパー"]
+
 # 日本基準の「主要な経営指標等の推移」に営業利益の欄がないため、
 # 損益計算書本体から補っている。本表は当期・前期しかないので2年分になる。
 NOTE_2Y = {"営業利益", "売上高"}
@@ -140,6 +148,7 @@ def main():
         buckets[bucket_of(sec)][sec] = {
             "n": companies[sec]["n"], "k": companies[sec]["k"], "e": companies[sec]["e"],
             "d": {m: data[sec][m] for m in ORDER if m in data[sec]},
+            "x": {m: data[sec][m] for m in EXTRA if m in data[sec]},
             "c": {m: v for m, v in corr[sec].items() if v},
         }
     for b, obj in buckets.items():

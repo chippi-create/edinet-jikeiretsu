@@ -497,7 +497,7 @@ function pageCompare(ctx) {
     lead: null,
     blocks: [{
       items: [
-        ...Dlines(ctx, "points", "推奨の背景を1行", 2).slice(0, 2),
+        ...Dlines(ctx, "whyMethod", "推奨の背景を1行", 2).slice(0, 2),
         stable?.ratio != null
           ? `${stable.label || "安定株主"}の議決権比率50%超維持を前提とした` +
             `発行規模設計を行いながら、株価上昇局面では調達額の増額余地を確保可能。`

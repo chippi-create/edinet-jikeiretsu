@@ -122,7 +122,8 @@
   <p class="note">
     有報から読み取れる論点を下書きします。中期経営計画や決算説明資料の本文を貼ると、
     そこからも書きます。<b>貼るのは公表済みの資料だけにしてください。</b><br>
-    送るのは会社の開示内容と数値だけです。提案する側の情報は送りません。
+    送るのは会社の開示内容・数値と、検討している手法名（MSワラント）だけです。
+    <b>証券会社名・部署名・割当先は送りません。</b>
   </p>
   <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（任意）"></textarea>
   <div class="row" style="margin-top:8px">
@@ -324,6 +325,7 @@ const SLOT_LABEL = {
   growthView: "財務と投資計画の方向性", story: "資本政策の背景",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
+  whyMethod: "その手法を選ぶ理由",
 };
 
 $("ai").onclick = async () => {
@@ -337,6 +339,7 @@ $("ai").onclick = async () => {
       body: JSON.stringify({
         code: ctx.code,
         slots: Object.keys(SLOT_LABEL),
+        method: "MSワラント",
         material: $("material").value.slice(0, 60000),
         refresh: $("refresh").checked,
       }),

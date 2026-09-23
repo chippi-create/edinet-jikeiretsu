@@ -99,6 +99,7 @@
 <div class="row">
   <div><label for="code">証券コード</label><input id="code" class="short" maxlength="4" placeholder="3444" autocomplete="off"></div>
   <div><button id="load">読み込む</button></div>
+  <div><button id="reset" class="ghost">最初から</button></div>
   <div id="loadmsg" class="ok"></div>
 </div>
 <div id="basis" class="card hide"></div>
@@ -185,7 +186,32 @@ const API = new URL(location.href).searchParams.get("api") || "";
 const dURL = (b) => DATA ? `${DATA}/d${b}.json` : `/d/${b}.json`;
 const sURL = (b) => DATA ? `${DATA}/s${b}.json` : `/s/${b}.json`;
 
-let ctx = null, shList = [], pages = null;
+let ctx = null, shList = [], pages = null, irDocs = [];
+
+/**
+ * 前の会社の情報を消す。
+ *
+ * 会社を読み込み直したときに古い数字や下書きが残っていると、
+ * 別の会社のものを提案書に混ぜてしまう。読み込むたびに全部捨てる。
+ */
+function clearAll() {
+  ctx = null; shList = []; pages = null; irDocs = [];
+  for (const id of ["price", "asof", "dil", "floor", "years",
+                    "material", "irurl", "pdfurl"]) $(id).value = "";
+  delete $("dil").dataset.touched;
+  $("slabel").value = "創業家";
+  $("keep").value = "50";
+  $("refresh").checked = false;
+  for (const id of ["irlist", "drafts", "out", "basis", "shlist"]) $(id).innerHTML = "";
+  for (const id of ["loadmsg", "gomsg", "aimsg", "irmsg", "pdfmsg",
+                    "stablenote", "irhint"]) $(id).textContent = "";
+  $("basis").classList.add("hide");
+  $("step2").classList.add("hide");
+  $("pptx").classList.add("hide");
+  $("copyall").classList.add("hide");
+}
+
+$("reset").onclick = () => { clearAll(); $("code").value = ""; $("code").focus(); };
 
 const pickLatest = (x) => {
   if (!x) return null;
@@ -196,6 +222,9 @@ const pickLatest = (x) => {
 async function load() {
   const code = $("code").value.trim().toUpperCase();
   if (!/^[0-9A-Z]{4}$/.test(code)) { $("loadmsg").textContent = "証券コードは4文字です"; return; }
+  // 前の会社のものを先に全部捨てる。混ざると気づけない。
+  clearAll();
+  $("code").value = code;
   $("loadmsg").textContent = "読み込み中…";
   const b = code.slice(0, 2);
   let fin = {}, sec = {}, meta = {};
@@ -352,7 +381,6 @@ $("copyall").onclick = () => copy(pages.map(pageText).join("\n\n"), $("gomsg"));
 // 決算短信・決算説明資料・中期経営計画はEDINETに無いので、会社のIRページから取る。
 // 押されたときだけ動く。取るのは選ばれたものだけ。
 
-let irDocs = [];
 // 提案の材料として効く順。これだけ最初からチェックを入れておく。
 const IR_PICK = ["決算短信", "決算説明資料", "中期経営計画"];
 

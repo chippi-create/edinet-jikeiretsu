@@ -123,6 +123,13 @@
     <div><label for="years">権利行使期間（年）</label><input id="years" class="short" inputmode="decimal" placeholder="空欄可"></div>
   </div>
   <p class="note">下限行使価額と権利行使期間は会社との個別交渉で決まるので、既定値は置いていません。入れた場合だけ計算します。</p>
+  <div class="row" style="margin-top:10px">
+    <div><label for="months">事業に要る手元資金（月商の何ヶ月）</label><input id="months" class="short" value="1.5" inputmode="decimal"></div>
+    <div><label for="capex">年間の投資額（百万円）</label><input id="capex" class="short" inputmode="numeric" placeholder="中計から"></div>
+    <div><label for="growth">売上の伸び（%）</label><input id="growth" class="short" inputmode="decimal" placeholder="過去5年平均"></div>
+    <div><label for="yrs">何年先まで見るか</label><input id="yrs" class="short" value="5" inputmode="numeric"></div>
+  </div>
+  <p class="note">資金の余力を見るページの前提です。空欄なら実績から置きます。</p>
 
   <h2>4. AIに下書きさせる（任意）</h2>
   <p class="note">
@@ -220,7 +227,9 @@ const memo = {
 function clearAll() {
   ctx = null; shList = []; pages = null; irDocs = [];
   for (const id of ["price", "asof", "dil", "floor", "years",
-                    "material", "irurl", "pdfurl"]) $(id).value = "";
+                    "capex", "growth", "material", "irurl", "pdfurl"]) $(id).value = "";
+  $("months").value = "1.5";
+  $("yrs").value = "5";
   delete $("dil").dataset.touched;
   $("slabel").value = "創業家";
   $("keep").value = "50";
@@ -361,6 +370,12 @@ $("go").onclick = () => {
   if (!ctx) return;
   ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {} };
   ctx.dilution = (n($("dil").value) || 13.1) / 100;
+  ctx.cashOpts = {
+    monthsOfSales: n($("months").value) || 1.5,
+    years: Math.min(10, Math.max(1, n($("yrs").value) || 5)),
+    capexPerYear: n($("capex").value) ? n($("capex").value) * 1e6 : null,
+    growth: $("growth").value.trim() === "" ? null : n($("growth").value) / 100,
+  };
   ctx.terms = {
     floorRatio: n($("floor").value) ? n($("floor").value) / 100 : null,
     years: n($("years").value) || null,

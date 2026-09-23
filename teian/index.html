@@ -189,6 +189,29 @@ const sURL = (b) => DATA ? `${DATA}/s${b}.json` : `/s/${b}.json`;
 let ctx = null, shList = [], pages = null, irDocs = [];
 
 /**
+ * 一度うまくいったIRページのURLを、この端末に覚えておく。
+ *
+ * 有報から会社のサイトを当てるのは、どうやっても推定にしかならない。
+ * XBRLにURLの項目が無く、本文に自社URLを書かない会社があるため。
+ * それなら、1社につき1回だけ入れてもらって、次からは出す。
+ *
+ * 保存先はこのブラウザの中だけ。サーバーには送らない。
+ * 消えることもあるので、消えても困らない作りにしておく。
+ */
+const memo = {
+  key: (code) => `teian:ir:${code}`,
+  get(code) {
+    try { return localStorage.getItem(this.key(code)) || ""; } catch { return ""; }
+  },
+  set(code, url) {
+    try { if (code && url) localStorage.setItem(this.key(code), url); } catch { /* 使えなくてよい */ }
+  },
+  drop(code) {
+    try { localStorage.removeItem(this.key(code)); } catch { /* 同上 */ }
+  },
+};
+
+/**
  * 前の会社の情報を消す。
  *
  * 会社を読み込み直したときに古い数字や下書きが残っていると、
@@ -271,10 +294,15 @@ async function load() {
   // 目で確かめてもらう。黙って使わせない。
   const w = (sec.web || [])[0] || [];
   const host = w[0], times = Number(w[1] || 0), suspect = w[2] === "?";
-  $("irurl").value = host ? `https://${host}/` : "";
+  // 前にうまくいったURLがあれば、推定より優先する。
+  const saved = memo.get(code);
+  $("irurl").value = saved || (host ? `https://${host}/` : "");
   $("irurl").placeholder = host
     ? "" : "この会社のサイトは有報から拾えませんでした。IRページのURLを入れてください";
-  $("irhint").innerHTML = !host
+  $("irhint").innerHTML = saved
+    ? `前にこの会社で使ったURLです（この端末に覚えています）。` +
+      `<a href="#" id="irforget">忘れる</a>`
+    : !host
     ? "この会社のサイトは有報から拾えなかったので、IRページのURLを入れてください。"
     : suspect
       ? `<b style="color:var(--todo)">${esc(host)} は会社のサイトではなさそうです。</b>` +
@@ -284,6 +312,12 @@ async function load() {
           `違っていたら書き換えてください。`
         : `有報に${times}回出てきた ${esc(host)} を入れました。` +
           `IRページのURLに書き換えると、より確実に見つかります。`;
+  const f = $("irforget");
+  if (f) f.onclick = (e) => {
+    e.preventDefault();
+    memo.drop(code);
+    $("irhint").textContent = "覚えていたURLを消しました。読み込み直すと推定に戻ります。";
+  };
 
   shList = shareholders(sec.sh);
   $("shlist").innerHTML = shList.length
@@ -437,6 +471,8 @@ $("irfind").onclick = async () => {
     const j = await res.json();
     if (!res.ok) { $("irmsg").textContent = j.error || "探せませんでした"; return; }
     irDocs = j.docs || [];
+    // 資料が取れたURLだけ覚える。空振りしたURLを覚えても意味がない。
+    if (irDocs.length && ctx) memo.set(ctx.code, $("irurl").value.trim());
     renderIR(j);
   } catch {
     $("irmsg").textContent = "IRページにつながりませんでした";

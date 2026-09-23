@@ -25,7 +25,7 @@ const TIMEOUT = 10000;
 const MAX_HTML = 5 * 1024 * 1024;
 const MAX_PDF = 25 * 1024 * 1024;
 const MAX_TEXT = 120000;
-const MAX_FETCH = 24;      // 1回の探索で叩く上限。相手に負担をかけないため。
+const MAX_FETCH = 34;      // 1回の探索で叩く上限。相手に負担をかけないため。
 const BUDGET = 18000;      // 全体の持ち時間。関数の上限(26秒)より手前で切り上げる。
 
 // IRページ・IR用JSらしさの見分け方。会社ごとにばらばらなので広めに取る。
@@ -210,6 +210,26 @@ function fromJSON(text) {
   return out;
 }
 
+/**
+ * 配信元(E-IR)のURLは規則的で、こうなっている。
+ *   //ssl4.eir-parts.net/V4Public/EIR/<コード>/ja/<種別>/<種別>_<番号>.js
+ * 実物では press_2=決算短信、press_3=プレスリリース、ir_material_5=その他資料 だった。
+ *
+ * 1本見つかれば兄弟も同じ形なので、会社のページを順に追うより直接叩くほうが
+ * 確実で速い。番号は会社ごとに違うので、少ない範囲だけ当たってみる。
+ */
+const EIR_CATS = { press: 5, ir_material: 6, yuho: 3, meeting: 2 };
+
+function eirSiblings(url) {
+  const m = /^(https?:\/\/[^\/]+\/V4Public\/EIR\/[^\/]+\/[a-z]{2})\/[^\/]+\/[^\/]+\.js/i.exec(url);
+  if (!m) return [];
+  const out = [];
+  for (const [cat, max] of Object.entries(EIR_CATS)) {
+    for (let n = 1; n <= max; n++) out.push(`${m[1]}/${cat}/${cat}_${n}.js`);
+  }
+  return out;
+}
+
 /** 次にたどる先。同じ会社のIRページと、IR用のJS。 */
 function nextLinks(text, base, isHTML) {
   const host = new URL(base).hostname;
@@ -312,14 +332,24 @@ export default async (req) => {
       if (!docs.has(d.url)) docs.set(d.url, d);
     }
 
+    // 配信元が1本見つかったら、その兄弟をまとめて先頭に積む。
+    // 会社のページを順に追うより確実なので、深さの制限とは別扱いにする。
+    for (const sib of eirSiblings(r.url)) {
+      if (visited.includes(sib) || queue.some((q) => q.url === sib)) continue;
+      queue.unshift({ url: sib, depth: 0, sibling: true });
+    }
+
     if (depth < 2) {
       for (const u of nextLinks(text, r.url, isHTML)) {
         if (visited.includes(u) || queue.some((q) => q.url === u)) continue;
         queue.push({ url: u, depth: depth + 1 });
       }
       // 点数の高いものから見に行く。浅いほうを少し優先する。
-      queue.sort((a, b) => (score(b.url) - b.depth) - (score(a.url) - a.depth));
-      queue = queue.slice(0, 24);
+      // 配信元の兄弟は確実に当たるので、いちばん前に置く。
+      queue.sort((a, b) =>
+        (b.sibling ? 100 : 0) - (a.sibling ? 100 : 0)
+        || (score(b.url) - b.depth) - (score(a.url) - a.depth));
+      queue = queue.slice(0, 40);
     }
   }
 

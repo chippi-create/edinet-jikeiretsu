@@ -328,32 +328,52 @@ const SLOT_LABEL = {
   whyMethod: "その手法を選ぶ理由",
 };
 
+// 1回で全部書かせると26秒の上限を超えて504になる。項目を分けて並行に投げる。
+const SLOT_GROUPS = [
+  ["mgmtSummary", "stockView", "growthView"],
+  ["story", "useOfFunds", "whyMethod"],
+  ["segExisting", "segNew", "points"],
+];
+
 $("ai").onclick = async () => {
   if (!ctx) { alert("先に会社を読み込んでください"); return; }
   $("ai").disabled = true;
-  $("aimsg").textContent = "下書きを作っています（30秒ほどかかります）…";
-  try {
-    const res = await fetch(`${API}/api/draft`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        code: ctx.code,
-        slots: Object.keys(SLOT_LABEL),
-        method: "MSワラント",
-        material: $("material").value.slice(0, 60000),
-        refresh: $("refresh").checked,
-      }),
-    });
+  $("aimsg").textContent = "下書きを作っています（1分ほどかかります）…";
+  const material = $("material").value.slice(0, 60000);
+  const refresh = $("refresh").checked;
+
+  const call = (slots) => fetch(`${API}/api/draft`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: ctx.code, method: "MSワラント", slots, material, refresh }),
+  }).then(async (res) => {
     const j = await res.json();
-    if (!res.ok) { $("aimsg").textContent = j.error || "下書きできませんでした"; return; }
-    ctx.drafts = j.drafts || {};
-    renderDrafts(j);
+    if (!res.ok) throw new Error(j.error || `下書きできませんでした（${res.status}）`);
+    return j;
+  });
+
+  try {
+    // 1本ずつ順に投げる。並行にすると材料のキャッシュが効かず、
+    // 同じ材料を3回ぶん読ませることになる。
+    const drafts = {};
+    let last = null, cachedAll = true;
+    for (const g of SLOT_GROUPS) {
+      const j = await call(g);
+      Object.assign(drafts, j.drafts || {});
+      if (!j.cached) cachedAll = false;
+      last = j;
+      $("aimsg").textContent =
+        `下書きを作っています… ${Object.keys(drafts).length}/${
+          SLOT_GROUPS.flat().length}項目`;
+    }
+    ctx.drafts = drafts;
+    renderDrafts({ drafts, usedMaterial: Boolean(material) });
     $("aimsg").textContent =
-      (j.cached ? "保存してあったものを表示しています。" : "下書きしました。") +
-      (j.remaining != null ? `（本日あと${j.remaining}回）` : "");
+      (cachedAll ? "保存してあったものを表示しています。" : "下書きしました。") +
+      (last && last.remaining != null ? `（本日あと${last.remaining}回）` : "");
     if (pages) $("go").click();
-  } catch {
-    $("aimsg").textContent = "下書きの窓口につながりませんでした";
+  } catch (e) {
+    $("aimsg").textContent = e.message || "下書きの窓口につながりませんでした";
   } finally {
     $("ai").disabled = false;
   }

@@ -12,8 +12,16 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 
 const MODEL = "claude-opus-5";
-const DAILY_LIMIT = Number(process.env.DRAFT_DAILY_LIMIT || 10);
+// 1社の下書きは3回に分けて呼ぶので、社数の3倍を見込んでおく。
+const DAILY_LIMIT = Number(process.env.DRAFT_DAILY_LIMIT || 30);
 const MAX_MATERIAL = 60000;   // 貼り付け資料の上限。これを超えたら切る。
+
+// Netlifyの関数は26秒で打ち切られる。
+// 9項目を1回で書かせると30秒を超えて504になったため、
+// 呼ぶ側が項目を分けて並行に投げる前提にしてある。
+// 1回あたりの項目数を増やすときは、実測してから増やすこと。
+const MAX_SLOTS = Number(process.env.DRAFT_MAX_SLOTS || 4);
+const EFFORT = process.env.DRAFT_EFFORT || "low";
 
 // 下書きする項目。idは呼ぶ側と合わせる。
 // 「提案」「推奨」という言葉は使わない。資本政策の論点として書かせる。
@@ -141,6 +149,9 @@ export default async (req) => {
 
   const want = Array.isArray(body.slots) ? body.slots.filter((s) => SLOTS[s]) : [];
   if (!want.length) return bad("下書きする項目が指定されていません");
+  if (want.length > MAX_SLOTS) {
+    return bad(`一度に書ける項目は${MAX_SLOTS}件までです（時間切れになるため）`, 400);
+  }
 
   // 貼り付け資料。公表済みのものを利用者が貼る前提。長すぎるものは切る。
   const material = String(body.material || "").slice(0, MAX_MATERIAL);
@@ -211,14 +222,29 @@ export default async (req) => {
     const res = await client.messages.create({
       model: MODEL,
       max_tokens: 8000,
-      output_config: { effort: "medium" },
+      output_config: { effort: EFFORT },
       system: SYSTEM,
       messages: [{
         role: "user",
-        content:
-          "以下は有価証券報告書などの開示資料からの抜粋です。" +
-          "ここに書かれていることだけを使って、指定された項目を書いてください。\n\n" +
-          `=== 資料 ===\n${facts}\n\n=== 書く項目 ===\n${ask}`,
+        // 材料は項目を分けても毎回同じものを送るので、そこだけキャッシュに載せる。
+        // 項目の指示は呼ぶたびに変わるので、別のブロックにして後ろに置く。
+        // こうしないとキャッシュの前方一致が崩れて効かない。
+        content: [
+          {
+            type: "text",
+            cache_control: { type: "ephemeral" },
+            text:
+              "以下は有価証券報告書などの開示資料からの抜粋です。" +
+              "ここに書かれていることだけを使って、指定された項目を書いてください。\n\n" +
+              (method
+                ? `なお、検討している資金調達の手法は「${method}」です。` +
+                  "ほかの手法と比べるときは、仕組みの違いとして書いてください。" +
+                  "審査に通るかどうかの話にはしないでください。\n\n"
+                : "") +
+              `=== 資料 ===\n${facts}`,
+          },
+          { type: "text", text: `\n\n=== 書く項目 ===\n${ask}` },
+        ],
       }],
     });
     if (res.stop_reason === "refusal") return bad("この内容は下書きできませんでした", 422);

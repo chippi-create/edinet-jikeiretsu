@@ -138,13 +138,13 @@ export function buildProposal(ctx) {
   const pages = [];
   pages.push(pageSummary(ctx));
   pages.push(pageVoting(ctx));
-  pages.push(...pageCash(ctx));
+  pages.push(pageCash(ctx));
   pages.push(pageStock(ctx));
   pages.push(pageGrowth(ctx));
   pages.push(pageShareholders(ctx));
   pages.push(pageCompare(ctx));
   pages.push(pageTerms(ctx));
-  return pages.flat().filter(Boolean);
+  return pages.filter(Boolean);
 }
 
 // --- p.2 エグゼクティブサマリー -------------------------------------------
@@ -315,13 +315,13 @@ function dilutionTable(ctx, rows, label) {
 function pageCash(ctx) {
   const a = analyze({ fin: ctx.fin, ext: ctx.ext, opts: ctx.cashOpts || {} });
   if (a.missing.length) {
-    return [{
+    return {
       no: 5, title: "資金の余力と調達の要否",
       lead: TODO("資金の状況についての結論を一文で"),
       blocks: [{ items: [
         `${a.missing.join("・")}がまだ取得できていないため、計算できません。`,
       ] }],
-    }];
+    };
   }
   const h = a.headroom, c = a.ccc, d = a.debt, f = a.fit;
   const y = (v) => v === null ? "—" : `${(v / 1e8).toFixed(1)}億円`;
@@ -349,94 +349,82 @@ function pageCash(ctx) {
       `自己資金（使える現金＋営業CF${y(a.opeCf)}）では**${y(a.gap)}足りない**。`);
   }
 
-  // 1枚に表を4つ置くと紙面に入らない。現状と将来で2枚に分ける。
-  return [
-    {
-      no: 5,
-      title: "資金の余力",
-      lead: `現預金${y(h.cash)}のうち、自由に使えるのは${y(h.free)}`,
-      blocks: [{ items: items.slice(0, 2) }],
-      tables: [
-        {
-          caption: "手元資金の内訳",
-          head: ["項目", "金額"],
-          rows: [
-            ["現預金", y(h.cash)],
-            ["月商", y(h.monthly)],
-            [`− 事業に要る手元資金（月商×${a.opts.monthsOfSales}ヶ月）`, y(h.need)],
-            ["− 1年内に返す借入", y(h.within1y)],
-            ["＝ 自由に使える現金", y(h.free)],
-          ],
-          pick: 4,
-        },
-        c.days === null ? null : {
-          caption: "運転資本と現金化までの日数",
-          head: ["項目", "金額", "日数"],
-          rows: [
-            ["売上債権", y(a.wc.ar), dd(c.dso)],
-            ["棚卸資産", y(a.wc.inv), dd(c.dio)],
-            ["仕入債務", y(a.wc.ap), `−${dd(c.dpo)}`],
-            ["運転資本 / CCC", y(a.wc.wc), dd(c.days)],
-          ],
-        },
-      ].filter(Boolean),
-      notes: [
-        `前提：事業に要る手元資金＝月商×${a.opts.monthsOfSales}ヶ月。` +
-        "棚卸資産と仕入債務の日数は売上原価で割っています（売上高で割ると粗利のぶん短く出ます）。",
-      ],
-    },
-    {
-      no: 5,
-      title: "調達の要否",
-      lead: p.shortfallYear
-        ? `いまのペースが続くと、${p.shortfallYear}年後に手元資金の下限を割る`
-        : `いまのペースなら、${a.opts.years}年後も手元資金の下限を保てる`,
-      blocks: [
-        { items: items.slice(2) },
-        { head: "借入とエクイティのどちらが向くか", items: f.points.map((q) => q.text) },
-      ],
-      tables: [
-        {
-          caption: `現金の見込み（年${(a.growth * 100).toFixed(1)}%増収・営業CF率` +
-                   `${(a.opeCfRatio * 100).toFixed(1)}%・投資年${y(a.capexPerYear)}）`,
-          head: ["", ...p.rows.map((r) => `${r.year}年後`)],
-          rows: [
-            ["営業CF", ...p.rows.map((r) => y(r.ope))],
-            ["投資・返済", ...p.rows.map((r) => `−${y(r.out)}`)],
-            ["現金残高", ...p.rows.map((r) => y(r.cash))],
-            ["下限との差", ...p.rows.map((r) => y(r.short))],
-          ],
-        },
-        {
-          caption: "借入余力の指標",
-          head: ["項目", "値"],
-          rows: [
-            ["有利子負債", y(d.total)],
-            ["ネット有利子負債（−現預金）", y(f.netDebt)],
-            ["EBITDA（営業利益＋減価償却費）", y(f.ebitda)],
-            ["有利子負債 ÷ EBITDA", x(f.debtEbitda)],
-            ["営業利益 ÷ 支払利息", x(f.cover)],
-            ["自己資本比率", f.equityRatio === null ? "—" : `${(f.equityRatio * 100).toFixed(1)}%`],
-            ["D/Eレシオ", x(f.de, 2)],
-          ],
-        },
-      ],
-      notes: [
-        `前提：売上の伸び＝${(a.growth * 100).toFixed(1)}%、営業CF率＝` +
-        `${(a.opeCfRatio * 100).toFixed(1)}%、投資＝年${y(a.capexPerYear)}、` +
-        "返済＝1年内返済額が毎年続くと仮定。返済予定表は有報から取れないため粗い仮定です。",
-        `見立て：${f.lean}。株価と金利の状況、会社の意向で変わります。`,
-      ],
-    },
-  ];
+  return {
+    no: 5,
+    title: "資金の余力と調達の要否",
+    lead: p.shortfallYear
+      ? `自由に使える現金は${y(h.free)}。いまのペースでは${p.shortfallYear}年後に手元資金の下限を割る`
+      : `自由に使える現金は${y(h.free)}。当面の資金繰りに支障はない`,
+    blocks: [
+      { items },
+      { head: "借入とエクイティのどちらが向くか", items: f.points.map((q) => q.text) },
+    ],
+    tables: [
+      {
+        caption: "手元資金の内訳",
+        head: ["項目", "金額"],
+        rows: [
+          ["現預金", y(h.cash)],
+          ["月商", y(h.monthly)],
+          [`− 事業に要る手元資金（月商×${a.opts.monthsOfSales}ヶ月）`, y(h.need)],
+          ["− 1年内に返す借入", y(h.within1y)],
+          ["＝ 自由に使える現金", y(h.free)],
+        ],
+        pick: 4,
+      },
+      c.days === null ? null : {
+        caption: "運転資本と現金化までの日数",
+        head: ["項目", "金額", "日数"],
+        rows: [
+          ["売上債権", y(a.wc.ar), dd(c.dso)],
+          ["棚卸資産", y(a.wc.inv), dd(c.dio)],
+          ["仕入債務", y(a.wc.ap), `−${dd(c.dpo)}`],
+          ["運転資本 / CCC", y(a.wc.wc), dd(c.days)],
+        ],
+      },
+      {
+        caption: `現金の見込み（年${(a.growth * 100).toFixed(1)}%増収・営業CF率` +
+                 `${(a.opeCfRatio * 100).toFixed(1)}%・投資年${y(a.capexPerYear)}）`,
+        head: ["", ...p.rows.map((r) => `${r.year}年後`)],
+        rows: [
+          ["売上高", ...p.rows.map((r) => y(r.sales))],
+          ["営業CF", ...p.rows.map((r) => y(r.ope))],
+          ["投資・返済", ...p.rows.map((r) => `−${y(r.out)}`)],
+          ["現金残高", ...p.rows.map((r) => y(r.cash))],
+          ["下限との差", ...p.rows.map((r) => y(r.short))],
+        ],
+      },
+      {
+        caption: "借入余力の指標",
+        head: ["項目", "値"],
+        rows: [
+          ["有利子負債", y(d.total)],
+          ["　うち1年内返済", y(d.within1y)],
+          ["ネット有利子負債（−現預金）", y(f.netDebt)],
+          ["EBITDA（営業利益＋減価償却費）", y(f.ebitda)],
+          ["有利子負債 ÷ EBITDA", x(f.debtEbitda)],
+          ["営業利益 ÷ 支払利息", x(f.cover)],
+          ["自己資本比率", f.equityRatio === null ? "—" : `${(f.equityRatio * 100).toFixed(1)}%`],
+          ["D/Eレシオ", x(f.de, 2)],
+        ],
+      },
+    ].filter(Boolean),
+    notes: [
+      `前提：事業に要る手元資金＝月商×${a.opts.monthsOfSales}ヶ月、` +
+      `売上の伸び＝過去5年の年平均${(a.growth * 100).toFixed(1)}%、` +
+      `営業CF率＝直近3年平均${(a.opeCfRatio * 100).toFixed(1)}%、` +
+      `投資額＝年${y(a.capexPerYear)}、返済＝1年内返済額が毎年続くと仮定。`,
+      "借入の返済予定表は有価証券報告書から取れないため、返済は粗い仮定です。" +
+      "中期経営計画の数値があれば、そちらで置き換えてください。",
+      `見立て：${f.lean}。ただし株価と金利の状況、会社の意向で変わります。`,
+    ],
+  };
 }
 
 // --- p.6 株価の状況 --------------------------------------------------------
 
 function pageStock(ctx) {
   const { fin, ext, market, basis } = ctx;
-  // 決算短信から拾えた通期予想。有報には載らないので、ここでしか埋まらない。
-  const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
   const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const row = (label, key, src) => [
     label, ...years.map((y) => {
@@ -447,12 +435,6 @@ function pageStock(ctx) {
 
   const sales = series(fin["売上高"], 2);
   const items = [];
-  if (fc && fc.actual) {
-    items.push(`${fc.actual.期}は売上高${fmt(fc.actual.売上高)}百万円、` +
-      `営業${fc.actual.営業利益 < 0 ? "損失" : "利益"}` +
-      `${fmt(Math.abs(fc.actual.営業利益))}百万円` +
-      `（${fc.announced || ""}公表の決算短信）。`);
-  }
   if (sales.length === 2) {
     const t = trend(sales[1][1], sales[0][1], "増収", "減収");
     items.push(`直近期は${t}。` + TODO("その理由を1行"));
@@ -470,19 +452,17 @@ function pageStock(ctx) {
     tables: [
       {
         caption: `【通期】（百万円）`,
-        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace("月期", "")}`),
-               ...(fc ? [`${fc.period}予想`] : [])],
+        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace("月期", "")}`)],
         rows: [
-          [...row("売上高", "売上高"), ...(fc ? [fmt(fc.forecast.売上高)] : [])],
-          [...row("営業利益", "営業利益"), ...(fc ? [fmt(fc.forecast.営業利益)] : [])],
-          [...row("経常利益", "経常利益"), ...(fc ? [fmt(fc.forecast.経常利益)] : [])],
-          [...row("純利益", "純利益"), ...(fc ? [fmt(fc.forecast.純利益)] : [])],
+          row("売上高", "売上高"),
+          row("営業利益", "営業利益"),
+          row("経常利益", "経常利益"),
+          row("純利益", "純利益"),
           ["配当", ...years.map((y) => {
             const v = num(ext["1株当たり配当"]?.[y]);
             return v === null ? "—" : String(v);
-          }), ...(fc ? [TODO("配当予想")] : [])],
-          ["発表日", ...years.map(() => TODO("発表日")),
-           ...(fc ? [fc.announced || TODO("発表日")] : [])],
+          })],
+          ["発表日", ...years.map(() => TODO("発表日"))],
         ],
       },
       {
@@ -506,7 +486,6 @@ function pageStock(ctx) {
 
 function pageGrowth(ctx) {
   const { fin, ext, sec } = ctx;
-  const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
   const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const line = (label, key, src, conv = mm) => [
     label, ...years.map((y) => {
@@ -555,19 +534,12 @@ function pageGrowth(ctx) {
   }
   items.push(TODO("中期経営計画の策定・公表を見据えた、エクイティファイナンスへの橋渡しを一文で"));
 
-  if (fc) {
-    // 予想の列を右に足す。取れているのは4項目だけなので、他は空ける。
-    const add = { "売上高": fc.forecast.売上高, "営業利益": fc.forecast.営業利益,
-                  "当期純利益": fc.forecast.純利益 };
-    for (const r of rows) r.push(add[r[0]] !== undefined ? fmt(add[r[0]]) : "—");
-  }
-
   return {
     no: 7,
     title: "成長投資フェーズへの移行",
     lead: D(ctx, "growthView", "中期経営計画を踏まえた方向性を一文で"),
     tables: [{ caption: "主な経営指標（連結・百万円）",
-               head: ["決算期", ...years, ...(fc ? [`${fc.period}予想`] : [])], rows }],
+               head: ["決算期", ...years], rows }],
     blocks: [
       { items },
       {

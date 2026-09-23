@@ -162,7 +162,6 @@
     <div><label style="display:inline"><input type="checkbox" id="refresh" style="width:auto"> 作り直す</label></div>
     <span id="aimsg" class="ok"></span>
   </div>
-  <p class="note" id="tanshinmsg"></p>
   <div id="drafts"></div>
 
   <div class="bar">
@@ -171,7 +170,6 @@
     <button id="copyall" class="ghost hide">文章をまとめてコピー</button>
     <span id="gomsg" class="ok"></span>
   </div>
-  <p class="note" id="warn"></p>
 </div>
 
 <div id="out"></div>
@@ -181,7 +179,6 @@
 <script type="module">
 import { buildProposal, shareholders, stableRatio, pageText, countTodo } from "./teian.js";
 import { checkBasis, maxDilutionFor } from "./sim.js";
-import { parseTanshin, tanshinLine } from "./tanshin.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -237,9 +234,9 @@ function clearAll() {
   $("slabel").value = "創業家";
   $("keep").value = "50";
   $("refresh").checked = false;
-  for (const id of ["irlist", "drafts", "out", "basis", "shlist", "warn"]) $(id).innerHTML = "";
+  for (const id of ["irlist", "drafts", "out", "basis", "shlist"]) $(id).innerHTML = "";
   for (const id of ["loadmsg", "gomsg", "aimsg", "irmsg", "pdfmsg",
-                    "stablenote", "irhint", "tanshinmsg"]) $(id).textContent = "";
+                    "stablenote", "irhint"]) $(id).textContent = "";
   $("basis").classList.add("hide");
   $("step2").classList.add("hide");
   $("pptx").classList.add("hide");
@@ -274,17 +271,10 @@ async function load() {
   if (!meta.n) { $("loadmsg").textContent = "その証券コードのデータがありません"; return; }
 
   const x = meta.x || {};
-  // 発行済株式数は3か所に載る。【議決権の状況】＞【株式の総数等】＞主要な経営指標
-  // の順に採る。会社によって、どれか1つしか無いことがある。
-  const issued = pickLatest(x["発行済株式数"])
-    || pickLatest(x["発行済株式総数_期末"])
-    || pickLatest(x["単体_発行済株式総数"]);
+  const issued = pickLatest(x["発行済株式数"]) || pickLatest(x["単体_発行済株式総数"]);
   const units = pickLatest(x["議決権の個数"]);
-  // 単元株式数はXBRLにある（NumberOfSharesConstitutingOneUnit）。
-  // 取れなければ100株として扱う。上場会社は100株に統一されているため。
-  const unitSize = pickLatest(x["単元株式数"]) || 100;
   const treasury = pickLatest(x["自己株式数"]) || 0;
-  const voting = units ? units * unitSize : (issued ? issued - treasury : null);
+  const voting = units ? units * 100 : (issued ? issued - treasury : null);
 
   ctx = {
     code, name: meta.n, kessan: meta.e, kijun: meta.k,
@@ -303,9 +293,7 @@ async function load() {
       <tr><td>自己株式数</td><td class="n">${fmt(treasury)}</td></tr>
       <tr><td>単元未満株式</td><td class="n">${fmt(chk.odd)}</td></tr>
     </table>` +
-    (units
-      ? `<p class="note">議決権株式数は、議決権の個数 × 単元株式数${unitSize}株で出しています。</p>`
-      : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
+    (units ? "" : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
     (chk.problems.length ? `<p class="note" style="color:var(--todo)">${chk.problems.map(esc).join("<br>")}</p>` : "");
 
   // 有報から拾えた会社のサイトを、IRの欄に先に入れておく。
@@ -392,20 +380,8 @@ $("go").onclick = () => {
     floorRatio: n($("floor").value) ? n($("floor").value) / 100 : null,
     years: n($("years").value) || null,
   };
-  // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
-  // 入口ごとに呼ぶと漏れるので、組み立てる直前に必ず読み直す。
-  readTanshin(true);
   pages = buildProposal(ctx);
   render();
-  // 資料は入っているのに下書きをしていないと、文章に反映されない。
-  // 黙っていると「読み込んだのに変わらない」に見えるので、はっきり出す。
-  const hasMaterial = $("material").value.trim().length > 200;
-  const hasDrafts = ctx.drafts && Object.keys(ctx.drafts).length;
-  $("warn").innerHTML = (hasMaterial && !hasDrafts)
-    ? `<b style="color:var(--todo)">資料を読み込みましたが、AIの下書きをしていません。</b>` +
-      `数字（通期予想など）は表に入りますが、<b>文章には反映されていません。</b>` +
-      `上の「AIに下書きさせる」を押してから、もう一度このボタンを押してください。`
-    : "";
   $("pptx").classList.remove("hide");
   $("copyall").classList.remove("hide");
   const t = countTodo(pages);
@@ -585,26 +561,6 @@ ${j.text}`);
     `${picked.length}本を読み込みました（${$("material").value.length.toLocaleString()}字）。`;
   $("irload").disabled = false;
 }
-
-/**
- * 貼られた資料から、決算短信の数字を読み取る。
- *
- * 有報は年1回で半年前の数字にしかならない。直近四半期と通期予想は
- * 短信にしかないので、ここで拾って表に入れる。
- * 数字は取り違えが怖いのでAIには渡さず、機械的に当てる。
- */
-function readTanshin(quiet) {
-  if (!ctx) return;
-  ctx.tanshin = parseTanshin($("material").value) || null;
-  const el = $("tanshinmsg");
-  el.innerHTML = ctx.tanshin
-    ? `決算短信を読み取りました：${esc(tanshinLine(ctx.tanshin))}`
-    : ($("material").value.trim()
-        ? "資料は入っていますが、決算短信の数字は読み取れませんでした（説明資料や中計だけの場合はこうなります）。"
-        : "");
-  if (!quiet && pages) $("go").click();
-}
-$("material").addEventListener("change", () => readTanshin(false));
 
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。

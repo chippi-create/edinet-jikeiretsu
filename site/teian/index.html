@@ -162,6 +162,7 @@
     <div><label style="display:inline"><input type="checkbox" id="refresh" style="width:auto"> 作り直す</label></div>
     <span id="aimsg" class="ok"></span>
   </div>
+  <p class="note" id="tanshinmsg"></p>
   <div id="drafts"></div>
 
   <div class="bar">
@@ -170,6 +171,7 @@
     <button id="copyall" class="ghost hide">文章をまとめてコピー</button>
     <span id="gomsg" class="ok"></span>
   </div>
+  <p class="note" id="warn"></p>
 </div>
 
 <div id="out"></div>
@@ -179,6 +181,7 @@
 <script type="module">
 import { buildProposal, shareholders, stableRatio, pageText, countTodo } from "./teian.js";
 import { checkBasis, maxDilutionFor } from "./sim.js";
+import { parseTanshin, tanshinLine } from "./tanshin.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -234,9 +237,9 @@ function clearAll() {
   $("slabel").value = "創業家";
   $("keep").value = "50";
   $("refresh").checked = false;
-  for (const id of ["irlist", "drafts", "out", "basis", "shlist"]) $(id).innerHTML = "";
+  for (const id of ["irlist", "drafts", "out", "basis", "shlist", "warn"]) $(id).innerHTML = "";
   for (const id of ["loadmsg", "gomsg", "aimsg", "irmsg", "pdfmsg",
-                    "stablenote", "irhint"]) $(id).textContent = "";
+                    "stablenote", "irhint", "tanshinmsg"]) $(id).textContent = "";
   $("basis").classList.add("hide");
   $("step2").classList.add("hide");
   $("pptx").classList.add("hide");
@@ -391,6 +394,15 @@ $("go").onclick = () => {
   };
   pages = buildProposal(ctx);
   render();
+  // 資料は入っているのに下書きをしていないと、文章に反映されない。
+  // 黙っていると「読み込んだのに変わらない」に見えるので、はっきり出す。
+  const hasMaterial = $("material").value.trim().length > 200;
+  const hasDrafts = ctx.drafts && Object.keys(ctx.drafts).length;
+  $("warn").innerHTML = (hasMaterial && !hasDrafts)
+    ? `<b style="color:var(--todo)">資料を読み込みましたが、AIの下書きをしていません。</b>` +
+      `数字（通期予想など）は表に入りますが、<b>文章には反映されていません。</b>` +
+      `上の「AIに下書きさせる」を押してから、もう一度このボタンを押してください。`
+    : "";
   $("pptx").classList.remove("hide");
   $("copyall").classList.remove("hide");
   const t = countTodo(pages);
@@ -570,6 +582,26 @@ ${j.text}`);
     `${picked.length}本を読み込みました（${$("material").value.length.toLocaleString()}字）。`;
   $("irload").disabled = false;
 }
+
+/**
+ * 貼られた資料から、決算短信の数字を読み取る。
+ *
+ * 有報は年1回で半年前の数字にしかならない。直近四半期と通期予想は
+ * 短信にしかないので、ここで拾って表に入れる。
+ * 数字は取り違えが怖いのでAIには渡さず、機械的に当てる。
+ */
+function readTanshin() {
+  if (!ctx) return;
+  ctx.tanshin = parseTanshin($("material").value) || null;
+  const el = $("tanshinmsg");
+  el.innerHTML = ctx.tanshin
+    ? `決算短信を読み取りました：${esc(tanshinLine(ctx.tanshin))}`
+    : ($("material").value.trim()
+        ? "資料は入っていますが、決算短信の数字は読み取れませんでした（説明資料や中計だけの場合はこうなります）。"
+        : "");
+  if (pages) $("go").click();
+}
+$("material").addEventListener("change", readTanshin);
 
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。

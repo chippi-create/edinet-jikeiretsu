@@ -435,6 +435,8 @@ function pageCash(ctx) {
 
 function pageStock(ctx) {
   const { fin, ext, market, basis } = ctx;
+  // 決算短信から拾えた通期予想。有報には載らないので、ここでしか埋まらない。
+  const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
   const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const row = (label, key, src) => [
     label, ...years.map((y) => {
@@ -445,6 +447,12 @@ function pageStock(ctx) {
 
   const sales = series(fin["売上高"], 2);
   const items = [];
+  if (fc && fc.actual) {
+    items.push(`${fc.actual.期}は売上高${fmt(fc.actual.売上高)}百万円、` +
+      `営業${fc.actual.営業利益 < 0 ? "損失" : "利益"}` +
+      `${fmt(Math.abs(fc.actual.営業利益))}百万円` +
+      `（${fc.announced || ""}公表の決算短信）。`);
+  }
   if (sales.length === 2) {
     const t = trend(sales[1][1], sales[0][1], "増収", "減収");
     items.push(`直近期は${t}。` + TODO("その理由を1行"));
@@ -462,17 +470,19 @@ function pageStock(ctx) {
     tables: [
       {
         caption: `【通期】（百万円）`,
-        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace("月期", "")}`)],
+        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace("月期", "")}`),
+               ...(fc ? [`${fc.period}予想`] : [])],
         rows: [
-          row("売上高", "売上高"),
-          row("営業利益", "営業利益"),
-          row("経常利益", "経常利益"),
-          row("純利益", "純利益"),
+          [...row("売上高", "売上高"), ...(fc ? [fmt(fc.forecast.売上高)] : [])],
+          [...row("営業利益", "営業利益"), ...(fc ? [fmt(fc.forecast.営業利益)] : [])],
+          [...row("経常利益", "経常利益"), ...(fc ? [fmt(fc.forecast.経常利益)] : [])],
+          [...row("純利益", "純利益"), ...(fc ? [fmt(fc.forecast.純利益)] : [])],
           ["配当", ...years.map((y) => {
             const v = num(ext["1株当たり配当"]?.[y]);
             return v === null ? "—" : String(v);
-          })],
-          ["発表日", ...years.map(() => TODO("発表日"))],
+          }), ...(fc ? [TODO("配当予想")] : [])],
+          ["発表日", ...years.map(() => TODO("発表日")),
+           ...(fc ? [fc.announced || TODO("発表日")] : [])],
         ],
       },
       {
@@ -496,6 +506,7 @@ function pageStock(ctx) {
 
 function pageGrowth(ctx) {
   const { fin, ext, sec } = ctx;
+  const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
   const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const line = (label, key, src, conv = mm) => [
     label, ...years.map((y) => {
@@ -544,12 +555,19 @@ function pageGrowth(ctx) {
   }
   items.push(TODO("中期経営計画の策定・公表を見据えた、エクイティファイナンスへの橋渡しを一文で"));
 
+  if (fc) {
+    // 予想の列を右に足す。取れているのは4項目だけなので、他は空ける。
+    const add = { "売上高": fc.forecast.売上高, "営業利益": fc.forecast.営業利益,
+                  "当期純利益": fc.forecast.純利益 };
+    for (const r of rows) r.push(add[r[0]] !== undefined ? fmt(add[r[0]]) : "—");
+  }
+
   return {
     no: 7,
     title: "成長投資フェーズへの移行",
     lead: D(ctx, "growthView", "中期経営計画を踏まえた方向性を一文で"),
     tables: [{ caption: "主な経営指標（連結・百万円）",
-               head: ["決算期", ...years], rows }],
+               head: ["決算期", ...years, ...(fc ? [`${fc.period}予想`] : [])], rows }],
     blocks: [
       { items },
       {

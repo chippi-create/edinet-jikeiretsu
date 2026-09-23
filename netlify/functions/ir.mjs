@@ -33,13 +33,17 @@ const IR_HINT = /(^|[\/_.-])(ir|investor|investors|library|kessan|tanshin|press|
 
 const DOC_HINT = {
   決算短信: /決算短信/,
-  決算説明資料: /説明(会)?資料|決算説明|プレゼンテーション/,
-  中期経営計画: /中期経営計画|中期計画|中計|長期(経営)?ビジョン/,
+  決算説明資料: /説明(会)?資料|決算説明|決算プレゼン|プレゼンテーション/,
+  中期経営計画: /中期経営計画|中期計画|中計|経営計画|長期(経営)?ビジョン|成長戦略|事業計画/,
   有価証券報告書: /有価証券報告書|四半期報告書|半期報告書/,
   招集通知: /招集ご?通知|株主総会/,
-  統合報告書: /統合報告|アニュアルレポート|レポート/,
+  統合報告書: /統合報告|アニュアルレポート|統合レポート/,
   適時開示: /お知らせ|に関する|修正|開示/,
 };
+
+// 「決算説明動画及び資料公開のお知らせ」のように、資料の名前を含んだ“告知”がある。
+// 中身は1ページの案内文で、資料そのものではない。題名の終わりで見分ける。
+const NOTICE = /(お知らせ|ご案内|について)\s*[)）]?\s*$/;
 
 function bad(message, status = 400) {
   return new Response(JSON.stringify({ error: message }), {
@@ -137,6 +141,9 @@ function score(url) {
 }
 
 function classify(title) {
+  // 題名が「〜のお知らせ」で終わるものは、資料ではなく告知。
+  // これを外さないと、28ページの決算説明資料より1ページの告知が先に並ぶ。
+  if (NOTICE.test(title)) return "適時開示";
   for (const [kind, re] of Object.entries(DOC_HINT)) if (re.test(title)) return kind;
   return "その他";
 }
@@ -356,7 +363,16 @@ export default async (req) => {
     }
   }
 
-  const list = [...docs.values()]
+  // 同じ資料が複数の配信元から出てくる。URLが違うので題名と日付でも畳む。
+  const byTitle = new Map();
+  for (const d of docs.values()) {
+    const k = `${d.kind}|${d.date}|${d.title}`;
+    const prev = byTitle.get(k);
+    // ページ数が分かっているほうを残す。
+    if (!prev || (!prev.pages && d.pages)) byTitle.set(k, d);
+  }
+
+  const list = [...byTitle.values()]
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return Response.json({

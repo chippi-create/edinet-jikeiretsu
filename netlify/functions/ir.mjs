@@ -29,7 +29,7 @@ const MAX_FETCH = 34;      // 1回の探索で叩く上限。相手に負担を�
 const BUDGET = 18000;      // 全体の持ち時間。関数の上限(26秒)より手前で切り上げる。
 
 // IRページ・IR用JSらしさの見分け方。会社ごとにばらばらなので広めに取る。
-const IR_HINT = /(^|[\/_.-])(ir|investor|investors|library|kessan|tanshin|press|material|financial|highlight)([\/_.-]|$)|IR情報|IRライブラリ|投資家|株主|決算|資料/i;
+const IR_HINT = /(^|[\/_.-])(ir|investor|investors|library|kessan|tanshin|press|material|financial|highlight)([\/_.-]|$)|XjStorage|eir|IR情報|IRライブラリ|投資家|株主|決算|資料/i;
 
 const DOC_HINT = {
   決算短信: /決算短信/,
@@ -144,6 +144,8 @@ function score(url) {
   // ライブラリの下の各ページ（短信・説明資料・その他）は、
   // それぞれが別の配信元JSを抱えている。ここを回らないと種類が偏る。
   if (/\/(library|shiryou|shiryo|ir_?data)\/[^\/]*\.html?$/.test(u)) n += 5;
+  // 「/ir/library.html」のように、ディレクトリではなくファイル名のこともある。
+  if (/\/(library|tanshin|kessan|financial|shiryou?)\.html?$/.test(u)) n += 5;
   if (/governance|faq|calendar|policy|disclaimer|contact|strength|news/.test(u)) n -= 6;
   return n;
 }
@@ -386,12 +388,17 @@ export default async (req) => {
     for (const u of eirSeeds(code)) queue.unshift({ url: u, depth: 0, sibling: true });
   }
 
-  // URLを指定されていないときだけ、配信元で足りたら会社のページは見に行かない。
-  // 有報から拾ったサイトが間違っていることがあるので、無駄に叩かない。
+  // URLを指定されていないときだけ、欲しいものが取れたら会社のページは見に行かない。
+  //
+  // 「20本取れたら十分」で打ち切っていたが、6433でニュースを78本拾った時点で
+  // 止まってしまい、決算短信のページまで行かなかった。本数ではなく
+  // 「欲しい種類が取れたか」で判断する。
   const explicit = Boolean(body.url);
+  const haveKey = () => [...docs.values()].some(
+    (d) => d.kind === "決算短信" || d.kind === "決算説明資料");
 
   while (queue.length && Date.now() < deadline) {
-    if (!explicit && docs.size >= 20 && !queue[0].sibling) break;
+    if (!explicit && haveKey() && docs.size >= 20 && !queue[0].sibling) break;
     const { url, depth } = queue.shift();
     if (visited.includes(url)) continue;
     const r = await get(url, MAX_HTML);

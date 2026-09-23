@@ -25,7 +25,7 @@ const TIMEOUT = 10000;
 const MAX_HTML = 5 * 1024 * 1024;
 const MAX_PDF = 25 * 1024 * 1024;
 const MAX_TEXT = 120000;
-const MAX_FETCH = 16;      // 1回の探索で叩く上限。相手に負担をかけないため。
+const MAX_FETCH = 24;      // 1回の探索で叩く上限。相手に負担をかけないため。
 const BUDGET = 18000;      // 全体の持ち時間。関数の上限(26秒)より手前で切り上げる。
 
 // IRページ・IR用JSらしさの見分け方。会社ごとにばらばらなので広めに取る。
@@ -129,6 +129,9 @@ function score(url) {
   if (/\/parts\//.test(u)) n += 4;
   if (/tanshin|material|press|library|kessan|setsumei|presentation/.test(u)) n += 4;
   if (/chuki|chukei|plan|vision|meeting|yuho|report/.test(u)) n += 2;
+  // ライブラリの下の各ページ（短信・説明資料・その他）は、
+  // それぞれが別の配信元JSを抱えている。ここを回らないと種類が偏る。
+  if (/\/(library|shiryou|shiryo|ir_?data)\/[^\/]*\.html?$/.test(u)) n += 5;
   if (/governance|faq|calendar|policy|disclaimer|contact|strength|news/.test(u)) n -= 6;
   return n;
 }
@@ -328,7 +331,7 @@ export default async (req) => {
     visited,
     notes,
     count: list.length,
-    docs: list.slice(0, 120),
+    docs: list.slice(0, 300),
   });
 };
 

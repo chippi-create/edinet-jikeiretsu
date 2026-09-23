@@ -155,6 +155,23 @@ def main():
         with open(os.path.join(SITE, "d", f"{b}.json"), "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
+    # 提案書ドラフトのページ。中身は静的なファイルなので、そのまま置くだけ。
+    # 帯のJSONと /api/draft を同じサイトから呼ぶので、別ドメインにしない。
+    src_teian = os.path.join(HERE, "teian")
+    if os.path.isdir(src_teian):
+        dst_teian = os.path.join(SITE, "teian")
+        os.makedirs(dst_teian, exist_ok=True)
+        n = 0
+        for fn in sorted(os.listdir(src_teian)):
+            if not fn.endswith((".html", ".js")):
+                continue
+            with open(os.path.join(src_teian, fn), encoding="utf-8") as f:
+                body = f.read()
+            with open(os.path.join(dst_teian, fn), "w", encoding="utf-8") as f:
+                f.write(body)
+            n += 1
+        print(f"提案書ドラフト: {n}ファイル -> site/teian/", flush=True)
+
     # 事業等のリスクは1社2万字ほどある。帯のJSONに混ぜると開いた瞬間に重くなるので、
     # 会社ごとのファイルにして、リスクのタブを見るときだけ取りに行く。
     def copy_per_company(src_name, dst_name, ext):

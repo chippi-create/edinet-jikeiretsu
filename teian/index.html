@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>提案書ドラフト</title>
+<style>
+  :root {
+    --bg:#fff; --fg:#1a1a1a; --muted:#6b7280; --line:#d9d9d9; --line2:#9ca3af;
+    --accent:#374151; --todo:#b45309; --todobg:#fef6e7; --field:#fff; --head:#f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#14161a; --fg:#e8eaed; --muted:#9aa0a6; --line:#343941; --line2:#4b5563;
+      --accent:#cbd5e1; --todo:#e0a83c; --todobg:#3a2f1a; --field:#1c1f24; --head:#22262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#14161a; --fg:#e8eaed; --muted:#9aa0a6; --line:#343941; --line2:#4b5563;
+    --accent:#cbd5e1; --todo:#e0a83c; --todobg:#3a2f1a; --field:#1c1f24; --head:#22262c;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg); font-size:15px; line-height:1.7;
+    font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+  }
+  .wrap { max-width:1040px; margin:0 auto; padding:24px 16px 100px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 20px; }
+  h2 { font-size:15px; margin:28px 0 8px; padding-left:10px; border-left:4px solid var(--accent); }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  input {
+    background:var(--field); color:var(--fg); border:1px solid var(--line2);
+    border-radius:4px; padding:7px 9px; font:inherit; font-size:14px; width:150px;
+  }
+  input.short { width:100px; }
+  button {
+    background:var(--accent); color:var(--bg); border:0; border-radius:4px;
+    padding:8px 16px; font:inherit; font-size:14px; cursor:pointer;
+  }
+  button.ghost {
+    background:transparent; color:var(--fg); border:1px solid var(--line2);
+    padding:3px 10px; font-size:12px;
+  }
+  button.big { padding:11px 22px; font-size:15px; }
+  table { border-collapse:collapse; margin:6px 0; font-size:13px; width:100%; }
+  th,td { border:1px solid var(--line); padding:4px 8px; vertical-align:top; white-space:pre-line; }
+  th { background:var(--head); font-weight:600; }
+  td.n, th.n { text-align:right; white-space:nowrap; }
+  tr.pick td { border-top:2px solid var(--line2); border-bottom:2px solid var(--line2); }
+  .card { border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin:10px 0; }
+  .page { border:1px solid var(--line); border-radius:6px; padding:14px 16px; margin:14px 0; }
+  .page h3 { font-size:15px; margin:0 0 6px; }
+  .page .pno { color:var(--muted); font-size:12px; font-weight:normal; margin-left:6px; }
+  .lead { border:1px solid var(--line); padding:5px 10px; margin:6px 0 10px; font-size:14px; }
+  .bhead { font-weight:600; margin:10px 0 2px; }
+  ul { margin:2px 0 6px; padding-left:20px; }
+  li { margin:2px 0; }
+  .todo { background:var(--todobg); color:var(--todo); padding:0 3px; border-radius:3px; }
+  .note { color:var(--muted); font-size:12px; margin:4px 0 0; }
+  .cap { font-size:12px; color:var(--muted); margin-top:8px; }
+  .hide { display:none; }
+  .tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ok { color:var(--muted); font-size:12px; }
+  .shl { max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:4px; padding:6px 10px; }
+  .shl label { display:flex; gap:8px; align-items:baseline; font-size:13px; color:var(--fg); margin:2px 0; }
+  .shl input[type=checkbox] { width:auto; }
+  .shl .r { color:var(--muted); margin-left:auto; font-variant-numeric:tabular-nums; }
+  textarea {
+    width:100%; background:var(--field); color:var(--fg); border:1px solid var(--line2);
+    border-radius:4px; padding:8px 10px; font:inherit; font-size:13px; line-height:1.6;
+  }
+  .draft { border:1px solid var(--line); border-radius:4px; padding:8px 12px; margin:8px 0; }
+  .draft b { font-size:13px; }
+  .draft p { margin:4px 0 6px; white-space:pre-line; font-size:14px; }
+  .bar {
+    position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
+    padding:10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>提案書ドラフト</h1>
+<p class="sub">
+  有価証券報告書（EDINET）から、MSワラント提案の中身を組み立てます。体裁は持ちません。<br>
+  <span class="todo">【　】</span>は判断が要るところです。自動では埋めません。<br>
+  出典：金融庁 EDINET。投資判断の助言ではありません。
+</p>
+
+<h2>1. 会社</h2>
+<div class="row">
+  <div><label for="code">証券コード</label><input id="code" class="short" maxlength="4" placeholder="3444" autocomplete="off"></div>
+  <div><button id="load">読み込む</button></div>
+  <div id="loadmsg" class="ok"></div>
+</div>
+<div id="basis" class="card hide"></div>
+
+<div id="step2" class="hide">
+  <h2>2. 安定株主を選ぶ</h2>
+  <p class="note">議決権比率を維持したい株主にチェックを入れてください。合計比率から希薄化率の上限を出します。</p>
+  <div class="row" style="margin-bottom:8px">
+    <div><label for="slabel">呼び方</label><input id="slabel" value="創業家" class="short"></div>
+    <div><label for="keep">維持したい議決権比率（%）</label><input id="keep" class="short" value="50"></div>
+  </div>
+  <div id="shlist" class="shl"></div>
+  <p class="note" id="stablenote"></p>
+
+  <h2>3. 数字（任意。入れると文章に入ります）</h2>
+  <div class="row">
+    <div><label for="price">株価（円）</label><input id="price" class="short" inputmode="decimal"></div>
+    <div><label for="asof">基準日</label><input id="asof" type="date"></div>
+    <div><label for="dil">希薄化率（%）</label><input id="dil" class="short" inputmode="decimal"></div>
+    <div><label for="floor">下限行使価額（基準株価の%）</label><input id="floor" class="short" inputmode="decimal" placeholder="空欄可"></div>
+    <div><label for="years">権利行使期間（年）</label><input id="years" class="short" inputmode="decimal" placeholder="空欄可"></div>
+  </div>
+  <p class="note">下限行使価額と権利行使期間は会社との個別交渉で決まるので、既定値は置いていません。入れた場合だけ計算します。</p>
+
+  <h2>4. AIに下書きさせる（任意）</h2>
+  <p class="note">
+    有報から読み取れる論点を下書きします。中期経営計画や決算説明資料の本文を貼ると、
+    そこからも書きます。<b>貼るのは公表済みの資料だけにしてください。</b><br>
+    送るのは会社の開示内容と数値だけです。提案する側の情報は送りません。
+  </p>
+  <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（任意）"></textarea>
+  <div class="row" style="margin-top:8px">
+    <div><button id="ai" class="ghost">AIに下書きさせる</button></div>
+    <div><label style="display:inline"><input type="checkbox" id="refresh" style="width:auto"> 作り直す</label></div>
+    <span id="aimsg" class="ok"></span>
+  </div>
+  <div id="drafts"></div>
+
+  <div class="bar">
+    <button id="go" class="big">MSワラントを提案する</button>
+    <button id="pptx" class="ghost hide">骨格のPPTXをダウンロード</button>
+    <button id="copyall" class="ghost hide">文章をまとめてコピー</button>
+    <span id="gomsg" class="ok"></span>
+  </div>
+</div>
+
+<div id="out"></div>
+
+</div>
+
+<script type="module">
+import { buildProposal, shareholders, stableRatio, pageText, countTodo } from "./teian.js";
+import { checkBasis, maxDilutionFor } from "./sim.js";
+
+const $ = (id) => document.getElementById(id);
+const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
+const fmt = (v) => (v === null || v === undefined || Number.isNaN(v))
+  ? "—" : Math.round(v).toLocaleString("ja-JP");
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const markTodo = (s) => esc(s).replace(/【[^】]+】/g, (m) => `<span class="todo">${m}</span>`);
+
+const DATA = new URL(location.href).searchParams.get("data") || "";
+// 下書きの窓口。別のサイトに置く場合だけ ?api= で差し替える。
+const API = new URL(location.href).searchParams.get("api") || "";
+const dURL = (b) => DATA ? `${DATA}/d${b}.json` : `/d/${b}.json`;
+const sURL = (b) => DATA ? `${DATA}/s${b}.json` : `/s/${b}.json`;
+
+let ctx = null, shList = [], pages = null;
+
+const pickLatest = (x) => {
+  if (!x) return null;
+  const y = Object.keys(x).sort();
+  return y.length ? Number(String(x[y[y.length - 1]]).replace(/,/g, "")) : null;
+};
+
+async function load() {
+  const code = $("code").value.trim().toUpperCase();
+  if (!/^[0-9A-Z]{4}$/.test(code)) { $("loadmsg").textContent = "証券コードは4文字です"; return; }
+  $("loadmsg").textContent = "読み込み中…";
+  const b = code.slice(0, 2);
+  let fin = {}, sec = {}, meta = {};
+  try {
+    const [dr, sr] = await Promise.all([fetch(dURL(b)), fetch(sURL(b))]);
+    if (dr.ok) {
+      const o = (await dr.json())[code];
+      if (o) { meta = o; fin = o.d || {}; }
+    }
+    if (sr.ok) sec = (await sr.json())[code] || {};
+  } catch { /* 下で判定する */ }
+  if (!meta.n) { $("loadmsg").textContent = "その証券コードのデータがありません"; return; }
+
+  const x = meta.x || {};
+  const issued = pickLatest(x["発行済株式数"]) || pickLatest(x["単体_発行済株式総数"]);
+  const units = pickLatest(x["議決権の個数"]);
+  const treasury = pickLatest(x["自己株式数"]) || 0;
+  const voting = units ? units * 100 : (issued ? issued - treasury : null);
+
+  ctx = {
+    code, name: meta.n, kessan: meta.e, kijun: meta.k,
+    fin, ext: x, sec,
+    basis: { issued, voting, treasury },
+    market: {}, dilution: 0.131,
+  };
+
+  const chk = checkBasis(ctx.basis);
+  $("basis").classList.remove("hide");
+  $("basis").innerHTML =
+    `<b>${esc(meta.n)}</b>（${code}） ${esc(meta.e || "")} / ${esc(meta.k || "")}` +
+    `<table style="width:auto;margin-top:6px">
+      <tr><td>発行済株式数</td><td class="n">${fmt(issued)}</td></tr>
+      <tr><td>議決権株式数</td><td class="n">${fmt(voting)}</td></tr>
+      <tr><td>自己株式数</td><td class="n">${fmt(treasury)}</td></tr>
+      <tr><td>単元未満株式</td><td class="n">${fmt(chk.odd)}</td></tr>
+    </table>` +
+    (units ? "" : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
+    (chk.problems.length ? `<p class="note" style="color:var(--todo)">${chk.problems.map(esc).join("<br>")}</p>` : "");
+
+  shList = shareholders(sec.sh);
+  $("shlist").innerHTML = shList.length
+    ? shList.map((s, i) =>
+        `<label><input type="checkbox" data-i="${i}">${esc(s.name)}` +
+        `<span class="r">${fmt(s.shares)}株 / ${s.ratio != null ? (s.ratio * 100).toFixed(2) + "%" : "—"}</span></label>`).join("")
+    : `<p class="note">大株主の情報がまだ取得できていません。</p>`;
+  for (const cb of $("shlist").querySelectorAll("input")) cb.onchange = recalcStable;
+
+  $("step2").classList.remove("hide");
+  $("loadmsg").textContent = "";
+  recalcStable();
+}
+
+function recalcStable() {
+  if (!ctx) return;
+  const picked = [...$("shlist").querySelectorAll("input:checked")].map((c) => Number(c.dataset.i));
+  const keep = n($("keep").value) / 100 || 0.5;
+  const r = stableRatio(shList, picked, ctx.basis.voting);
+  ctx.stable = { picked, label: $("slabel").value.trim() || "安定株主", ...r };
+  if (r.ratio) {
+    const cap = maxDilutionFor(r.ratio, keep);
+    $("stablenote").innerHTML =
+      `選んだ${picked.length}名の合計は <b>${fmt(r.shares)}株 / ${(r.ratio * 100).toFixed(2)}%</b>。` +
+      (cap > 0
+        ? ` ${(keep * 100).toFixed(0)}%超を保てる希薄化率の上限は <b>${(cap * 100).toFixed(1)}%</b>。`
+        : ` すでに${(keep * 100).toFixed(0)}%を下回っています。`);
+    if (cap > 0 && !$("dil").dataset.touched) $("dil").value = (cap * 100).toFixed(1);
+  } else {
+    $("stablenote").textContent = "株主を選ぶと、維持できる希薄化率の上限が出ます。";
+  }
+}
+$("dil").addEventListener("input", () => { $("dil").dataset.touched = "1"; });
+$("keep").addEventListener("input", recalcStable);
+$("slabel").addEventListener("input", recalcStable);
+
+$("load").onclick = load;
+$("code").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+
+$("go").onclick = () => {
+  if (!ctx) return;
+  ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {} };
+  ctx.dilution = (n($("dil").value) || 13.1) / 100;
+  ctx.terms = {
+    floorRatio: n($("floor").value) ? n($("floor").value) / 100 : null,
+    years: n($("years").value) || null,
+  };
+  pages = buildProposal(ctx);
+  render();
+  $("pptx").classList.remove("hide");
+  $("copyall").classList.remove("hide");
+  const t = countTodo(pages);
+  $("gomsg").textContent = `${pages.length}ページ。埋めるところが ${t} か所あります。`;
+};
+
+function blocksHTML(blocks, depth = 0) {
+  if (!blocks) return "";
+  return blocks.map((b) => {
+    let h = "";
+    if (b.head) h += `<div class="bhead" style="margin-left:${depth * 12}px">${markTodo(b.head)}</div>`;
+    if (b.items?.length) {
+      h += `<ul style="margin-left:${depth * 12}px">` +
+        b.items.map((i) => `<li>${markTodo(i)}</li>`).join("") + `</ul>`;
+    }
+    h += blocksHTML(b.subs, depth + 1);
+    return h;
+  }).join("");
+}
+
+function tableHTML(t) {
+  const cell = (c, i) => `<td class="${/^[\d,\.%\-—円株倍]+$/.test(c) ? "n" : ""}">${markTodo(c)}</td>`;
+  return (t.caption ? `<div class="cap">${esc(t.caption)}</div>` : "") +
+    `<table><tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+    t.rows.map((r, i) => `<tr class="${t.pick === i ? "pick" : ""}">${r.map(cell).join("")}</tr>`).join("") +
+    (t.foot ? `<tr>${t.foot.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` : "") +
+    `</table>` + (t.note ? `<p class="note">${esc(t.note)}</p>` : "");
+}
+
+function render() {
+  $("out").innerHTML = `<h2>提案内容</h2>` + pages.map((p, idx) => `
+    <div class="page">
+      <h3>${esc(p.title)}<span class="pno">p.${p.no}</span></h3>
+      ${p.lead ? `<div class="lead">➤ ${markTodo(p.lead)}</div>` : ""}
+      ${blocksHTML(p.blocks)}
+      ${(p.tables || []).map(tableHTML).join("")}
+      ${(p.notes || []).map((x) => `<p class="note">※ ${markTodo(x)}</p>`).join("")}
+      <div class="tools" style="margin-top:10px">
+        <button class="ghost" data-t="${idx}">このページの文章をコピー</button>
+        <span class="ok" id="m${idx}"></span>
+      </div>
+    </div>`).join("");
+  for (const b of $("out").querySelectorAll("[data-t]")) {
+    b.onclick = () => copy(pageText(pages[Number(b.dataset.t)]), $("m" + b.dataset.t));
+  }
+}
+
+async function copy(text, msgEl) {
+  try { await navigator.clipboard.writeText(text); if (msgEl) msgEl.textContent = "コピーしました"; }
+  catch { if (msgEl) msgEl.textContent = "コピーできませんでした"; }
+  if (msgEl) setTimeout(() => { msgEl.textContent = ""; }, 2000);
+}
+
+$("copyall").onclick = () => copy(pages.map(pageText).join("\n\n"), $("gomsg"));
+
+// ---- AIの下書き ----------------------------------------------------------
+// 送るのは証券コードと、手元で貼った公表済み資料だけ。
+// 会社の開示内容はサーバー側が自分で読むので、こちらからは送らない。
+// 提案する側の情報（会社名・部署・割当先）は一切送らない。
+
+const SLOT_LABEL = {
+  mgmtSummary: "直近期の業績の総括", stockView: "株価の状況の結論",
+  growthView: "財務と投資計画の方向性", story: "資本政策の背景",
+  useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
+  segNew: "新規事業領域", points: "資本政策を検討する背景",
+};
+
+$("ai").onclick = async () => {
+  if (!ctx) { alert("先に会社を読み込んでください"); return; }
+  $("ai").disabled = true;
+  $("aimsg").textContent = "下書きを作っています（30秒ほどかかります）…";
+  try {
+    const res = await fetch(`${API}/api/draft`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: ctx.code,
+        slots: Object.keys(SLOT_LABEL),
+        material: $("material").value.slice(0, 60000),
+        refresh: $("refresh").checked,
+      }),
+    });
+    const j = await res.json();
+    if (!res.ok) { $("aimsg").textContent = j.error || "下書きできませんでした"; return; }
+    ctx.drafts = j.drafts || {};
+    renderDrafts(j);
+    $("aimsg").textContent =
+      (j.cached ? "保存してあったものを表示しています。" : "下書きしました。") +
+      (j.remaining != null ? `（本日あと${j.remaining}回）` : "");
+    if (pages) $("go").click();
+  } catch {
+    $("aimsg").textContent = "下書きの窓口につながりませんでした";
+  } finally {
+    $("ai").disabled = false;
+  }
+};
+
+function renderDrafts(j) {
+  const d = j.drafts || {};
+  $("drafts").innerHTML = Object.keys(SLOT_LABEL)
+    .filter((k) => d[k])
+    .map((k, i) => `<div class="draft"><b>${esc(SLOT_LABEL[k])}</b>` +
+      `<p>${esc(d[k])}</p>` +
+      `<button class="ghost" data-d="${esc(k)}">コピー</button>` +
+      `<span class="ok" id="dm${i}"></span></div>`).join("") +
+    `<p class="note">下書きです。事実かどうかは必ず開示資料で確かめてください。` +
+    (j.usedMaterial ? "貼り付けた資料も材料にしています。" : "有価証券報告書だけを材料にしています。") +
+    `</p>`;
+  [...$("drafts").querySelectorAll("[data-d]")].forEach((b, i) => {
+    b.onclick = () => copy(d[b.dataset.d], $("dm" + i));
+  });
+}
+
+// ---- 骨格のPPTX ----------------------------------------------------------
+// 組み立ては pptx.js にある。ロゴ・色・社名は入れない。
+
+$("pptx").onclick = async () => {
+  $("gomsg").textContent = "PPTXを作っています…";
+  if (!window.PptxGenJS) {
+    try {
+      await new Promise((ok, ng) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+        s.onload = ok; s.onerror = ng; document.head.appendChild(s);
+      });
+    } catch {
+      $("gomsg").textContent = "PPTXの部品を読み込めませんでした";
+      return;
+    }
+  }
+  const { buildPptx } = await import("./pptx.js");
+  const pptx = buildPptx(pages, window.PptxGenJS);
+  await pptx.writeFile({ fileName: `teian_${ctx.code}.pptx` });
+  $("gomsg").textContent = "ダウンロードしました";
+};
+</script>
+</body>
+</html>

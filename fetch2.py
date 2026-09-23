@@ -140,6 +140,47 @@ ITEMS = [
     ("自己株式数",
      [r"^TotalNumberOfSharesHeldTreasurySharesEtc$"],
      [r"^TotalNumberOfSharesHeldTreasurySharesEtc$"]),
+
+    # ここから下は資金繰りの分析に使う。
+    # 投資CF・財務CFは主要な経営指標等の推移にあり5年分。
+    ("投資CF",
+     [r"^CashFlowsFromUsedInInvestingActivitiesIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^NetCashProvidedByUsedInInvestingActivitiesSummaryOfBusinessResults$"]),
+    ("財務CF",
+     [r"^CashFlowsFromUsedInFinancingActivitiesIFRS(KeyFinancialData|SummaryOfBusinessResults)$"],
+     [r"^NetCashProvidedByUsedInFinancingActivitiesSummaryOfBusinessResults$"]),
+    ("売上原価", [r"^CostOfSalesIFRS$"], [r"^CostOfSales$"]),
+    ("減価償却費",
+     [r"^DepreciationAndAmortizationOpeCFIFRS$"],
+     [r"^DepreciationAndAmortizationOpeCF$"]),
+    ("支払利息", [], [r"^InterestExpensesNOE$"]),
+
+    # 運転資本。CCC（現金化までの日数）を出すのに要る。
+    #
+    # 会社によって科目の分け方が違う。受取手形と売掛金を分ける会社、
+    # 「受取手形及び売掛金」で一本にする会社、契約資産や電子記録債権を
+    # 別に立てる会社がある。どれか1つを選ぶと足りなくなるので、
+    # **内訳のまま溜めて、合算は使う側でやる。**
+    ("受取手形", [], [r"^NotesReceivableTrade$"]),
+    ("売掛金", [], [r"^AccountsReceivableTrade$"]),
+    ("受取手形及び売掛金", [], [r"^NotesAndAccountsReceivableTrade$"]),
+    ("契約資産", [], [r"^ContractAssets$"]),
+    ("電子記録債権", [], [r"^ElectronicallyRecordedMonetaryClaimsOperatingCA$"]),
+    ("売上債権IFRS",
+     [r"^TradeReceivablesAndContractAssetsCAIFRSIFRS$",
+      r"^TradeAndOtherReceivablesCAIFRS$"], []),
+
+    ("商品及び製品", [], [r"^MerchandiseAndFinishedGoods$"]),
+    ("仕掛品", [], [r"^WorkInProcess$"]),
+    ("原材料及び貯蔵品", [], [r"^RawMaterialsAndSupplies$"]),
+    ("棚卸資産", [r"^InventoriesCAIFRS$"], [r"^Inventories$"]),
+
+    ("支払手形", [], [r"^NotesPayableTrade$"]),
+    ("買掛金", [], [r"^AccountsPayableTrade$"]),
+    ("支払手形及び買掛金", [], [r"^NotesAndAccountsPayableTrade$"]),
+    ("電子記録債務", [], [r"^ElectronicallyRecordedObligationsOperatingCL$"]),
+    ("仕入債務IFRS",
+     [r"^TradePayables3CLIFRS$", r"^TradeAndOtherPayablesCLIFRS$"], []),
 ]
 
 # 提出会社（単体）だけから取る項目。

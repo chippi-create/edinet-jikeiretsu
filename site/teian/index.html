@@ -138,6 +138,7 @@
     <div><button id="irfind" class="ghost">IR資料を探す</button></div>
     <span id="irmsg" class="ok"></span>
   </div>
+  <p class="note" id="irhint"></p>
   <div id="irlist"></div>
   <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（下のボタンで自動で入ります）"></textarea>
   <div class="row" style="margin-top:8px">
@@ -225,6 +226,16 @@ async function load() {
     </table>` +
     (units ? "" : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
     (chk.problems.length ? `<p class="note" style="color:var(--todo)">${chk.problems.map(esc).join("<br>")}</p>` : "");
+
+  // 有報から拾えた会社のサイトを、IRの欄に先に入れておく。
+  // 95%の会社は分かる。分からない会社は自分で入れてもらう。
+  const host = (sec.web || [])[0]?.[0];
+  $("irurl").value = host ? `https://${host}/` : "";
+  $("irurl").placeholder = host
+    ? "" : "この会社のサイトは有報から拾えませんでした。IRページのURLを入れてください";
+  $("irhint").textContent = host
+    ? "有報から拾ったサイトです。IRページのURLに書き換えると、より確実に見つかります。"
+    : "この会社のサイトは有報から拾えなかったので、IRページのURLを入れてください。";
 
   shList = shareholders(sec.sh);
   $("shlist").innerHTML = shList.length
@@ -339,6 +350,11 @@ const IR_PICK = ["決算短信", "決算説明資料", "中期経営計画"];
 
 $("irfind").onclick = async () => {
   if (!ctx && !$("irurl").value.trim()) { alert("先に会社を読み込むか、URLを入れてください"); return; }
+  if (!$("irurl").value.trim() && ctx && !(ctx.sec?.web || []).length) {
+    $("irmsg").textContent = "この会社のサイトが分からないので、IRページのURLを入れてください。";
+    $("irurl").focus();
+    return;
+  }
   $("irfind").disabled = true;
   $("irmsg").textContent = "IRページを見ています（10秒ほど）…";
   try {

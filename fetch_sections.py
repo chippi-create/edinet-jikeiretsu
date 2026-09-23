@@ -305,7 +305,12 @@ def main():
     log(f"■ 蓄積の現状: 事業 {len(biz)}社 / 配当 {len(div)}社 / リスク {nrisk}社 "
         f"/ 所有者別 {len(own)}社 / 大株主 {len(sh)}社 / 役員 {len(of)}社")
 
-    picked = fetch2.pick_docs(index, quiet=True)
+    # 証券コードを指定すると、その会社だけを取り直す。
+    # 全社の一巡は7日かかるので、いま見たい会社を先に通すための逃げ道。
+    codes = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
+    picked = fetch2.pick_docs(index, targets=codes or None, quiet=True)
+    if codes:
+        log(f"■ 証券コード指定: {codes}")
     pending = [s for s in sorted(picked)
                if state.get(s, {}).get("docID") != picked[s]["本体"]["docID"]]
     log(f"■ 索引 {len(picked)}社 / 未取得または更新あり {len(pending)}社")

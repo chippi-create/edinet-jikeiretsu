@@ -23,6 +23,9 @@ on:
       sections_limit:
         description: "記述部分を1回で処理する会社数（ZIPが大きいので少なめ）"
         default: "600"
+      codes:
+        description: "証券コード（カンマ区切り）。入れるとその会社だけを取り直す"
+        default: ""
 
 permissions:
   contents: write
@@ -60,6 +63,8 @@ jobs:
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           LIMIT: ${{ inputs.limit || '600' }}
+          # 指定した会社だけを取り直すときに使う。順番待ちを飛ばせる。
+          SEC_CODES: ${{ inputs.codes }}
 
       # 記述部分が落ちても財務ぶんは残したいので、ここで止めない。
       - name: fetch sections
@@ -68,6 +73,7 @@ jobs:
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           LIMIT: ${{ inputs.sections_limit || '600' }}
+          SEC_CODES: ${{ inputs.codes }}
 
       - name: build site
         run: python build_site.py

@@ -139,6 +139,14 @@
     <span id="irmsg" class="ok"></span>
   </div>
   <p class="note" id="irhint"></p>
+  <div class="row" style="margin-bottom:8px">
+    <div style="flex:1 1 320px">
+      <label for="pdfurl">PDFのURLを直接読み込む（一覧に出てこないとき）</label>
+      <input id="pdfurl" style="width:100%" placeholder="https://…/00.pdf">
+    </div>
+    <div><button id="pdfload" class="ghost">このPDFを読み込む</button></div>
+    <span id="pdfmsg" class="ok"></span>
+  </div>
   <div id="irlist"></div>
   <textarea id="material" rows="5" placeholder="中期経営計画・決算説明資料などの本文を貼る（下のボタンで自動で入ります）"></textarea>
   <div class="row" style="margin-top:8px">
@@ -348,6 +356,31 @@ let irDocs = [];
 // 提案の材料として効く順。これだけ最初からチェックを入れておく。
 const IR_PICK = ["決算短信", "決算説明資料", "中期経営計画"];
 
+// 一覧に出てこないPDFは、URLを貼れば読み込める。どのサイトでも確実に通る道。
+$("pdfload").onclick = async () => {
+  const url = $("pdfurl").value.trim();
+  if (!/^https?:\/\/.+\.pdf/i.test(url)) { $("pdfmsg").textContent = "PDFのURLを入れてください"; return; }
+  $("pdfload").disabled = true;
+  $("pdfmsg").textContent = "読み込んでいます…";
+  try {
+    const res = await fetch(`${API}/api/ir`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "text", url }),
+    });
+    const j = await res.json();
+    if (!res.ok) { $("pdfmsg").textContent = j.error || "読み込めませんでした"; return; }
+    const now = $("material").value.trim();
+    const name = decodeURIComponent(url.split("/").slice(-2).join("/"));
+    $("material").value = (now ? now + "\n\n" : "") + `=== ${name} ===\n` + j.text;
+    $("pdfmsg").textContent = `${j.pages}ページ / ${j.chars.toLocaleString()}字 を読み込みました。`;
+    $("pdfurl").value = "";
+  } catch {
+    $("pdfmsg").textContent = "読み込めませんでした";
+  } finally {
+    $("pdfload").disabled = false;
+  }
+};
+
 $("irfind").onclick = async () => {
   if (!ctx && !$("irurl").value.trim()) { alert("先に会社を読み込むか、URLを入れてください"); return; }
   if (!$("irurl").value.trim() && ctx && !(ctx.sec?.web || []).length) {
@@ -375,8 +408,13 @@ $("irfind").onclick = async () => {
 
 function renderIR(j) {
   if (!irDocs.length) {
+    // IRページがJavaScriptで組み立てられていて、取得しただけでは
+    // 資料のリンクが1本も無いことがある。そのときは手で貼ってもらう。
     $("irlist").innerHTML = `<p class="note">資料が見つかりませんでした。` +
-      `IRページのURLを直接入れてみてください。</p>`;
+      `このIRページは、開いたあとに中身を組み立てる作りのようです。<br>` +
+      `ブラウザでIRページを開き、資料のリンクを右クリックしてURLをコピーして、` +
+      `上の「PDFのURLを直接読み込む」に貼ってください。<br>` +
+      `たどったページ: ${j.visited.length}件</p>`;
     $("irmsg").textContent = "";
     return;
   }

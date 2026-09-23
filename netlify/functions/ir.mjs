@@ -96,8 +96,16 @@ function makeFetcher(deadline) {
   };
 }
 
-/** 文字コードを当てる。日本語のIRページはShift_JISのこともある。 */
+/**
+ * 文字コードを当てる。日本語のIRページはShift_JISのこともある。
+ *
+ * IRサイトのJSにはUTF-16で書かれたものがあり、UTF-8として読むと
+ * 中身が全部文字化けして、配信元のURLが1つも見つからなかった。
+ * BOMがあればそれを優先する。
+ */
 function decode(buf, type) {
+  if (buf[0] === 0xff && buf[1] === 0xfe) return new TextDecoder("utf-16le").decode(buf);
+  if (buf[0] === 0xfe && buf[1] === 0xff) return new TextDecoder("utf-16be").decode(buf);
   const pick = (s) => (/charset=["']?([\w-]+)/i.exec(s || "") || [])[1];
   let cs = pick(type);
   if (!cs) cs = pick(new TextDecoder("utf-8").decode(buf.slice(0, 2048)));

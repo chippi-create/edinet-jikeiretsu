@@ -16,15 +16,20 @@ export const TODO = (what) => `【${what}】`;
 
 /** AIの下書きがあればそれを使い、無ければ【　】のまま残す。
  *  下書きは提案書の中身そのものではなく、開示から読み取れる論点として作らせている。 */
+const NO_MATERIAL = /材料が足りません|該当する記載はありません/;
+
 const D = (ctx, id, label) => {
   const v = ctx.drafts?.[id];
-  return (typeof v === "string" && v.trim()) ? v.trim() : TODO(label);
+  // 「材料が足りません」は下書きの答えであって、本文に差し込む文ではない。
+  // そのまま入れると定型文とつながって壊れた文になるので、【　】に戻す。
+  if (typeof v !== "string" || !v.trim() || NO_MATERIAL.test(v)) return TODO(label);
+  return v.trim();
 };
 
 /** 複数行の下書きを箇条書きに割る。無ければ【　】をn個返す。 */
 const Dlines = (ctx, id, label, n = 3) => {
   const v = ctx.drafts?.[id];
-  if (typeof v === "string" && v.trim()) {
+  if (typeof v === "string" && v.trim() && !NO_MATERIAL.test(v)) {
     return v.split(/\r?\n/).map((t) => t.replace(/^[・\-\s]+/, "").trim()).filter(Boolean);
   }
   return Array.from({ length: n }, () => TODO(label));
@@ -146,7 +151,8 @@ function pageSummary(ctx) {
   const { fin, ext, market, dilution } = ctx;
   const op = series(fin["営業利益"], 3);
   const eq = latest(fin["自己資本比率"]);
-  const cash = latest(ext["現金及び現金同等物"]) ?? latest(fin["営業CF"]);
+  // 現預金が取れないときに営業CFで代用してはいけない。別物なので黙って落とす。
+  const cash = latest(ext["現金及び現金同等物"]) ?? latest(ext["現金及び預金"]);
   const capex = latest(ext["設備投資"]);
   const rd = latest(ext["研究開発費"]);
 
@@ -157,8 +163,9 @@ function pageSummary(ctx) {
   if (opNow !== null) {
     // 赤字のときに「増益」と書くと意味が通らないので、言い方を変える。
     const neg = opNow < 0 || (opPrev !== null && opPrev < 0);
+    // 赤字どうしの比較では、値が増える＝損失が減る。増減の向きが利益と逆になる。
     const t = neg
-      ? trend(opNow, opPrev, "損失が拡大", "損失が縮小")
+      ? trend(opNow, opPrev, "損失が縮小", "損失が拡大")
       : trend(opNow, opPrev, "増益", "減益");
     const kuro = opPrev !== null && opPrev < 0 && opNow >= 0 ? "黒字転換" : null;
     zaimu.push(

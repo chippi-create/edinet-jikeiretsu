@@ -271,10 +271,17 @@ async function load() {
   if (!meta.n) { $("loadmsg").textContent = "その証券コードのデータがありません"; return; }
 
   const x = meta.x || {};
-  const issued = pickLatest(x["発行済株式数"]) || pickLatest(x["単体_発行済株式総数"]);
+  // 発行済株式数は3か所に載る。【議決権の状況】＞【株式の総数等】＞主要な経営指標
+  // の順に採る。会社によって、どれか1つしか無いことがある。
+  const issued = pickLatest(x["発行済株式数"])
+    || pickLatest(x["発行済株式総数_期末"])
+    || pickLatest(x["単体_発行済株式総数"]);
   const units = pickLatest(x["議決権の個数"]);
+  // 単元株式数はXBRLにある（NumberOfSharesConstitutingOneUnit）。
+  // 取れなければ100株として扱う。上場会社は100株に統一されているため。
+  const unitSize = pickLatest(x["単元株式数"]) || 100;
   const treasury = pickLatest(x["自己株式数"]) || 0;
-  const voting = units ? units * 100 : (issued ? issued - treasury : null);
+  const voting = units ? units * unitSize : (issued ? issued - treasury : null);
 
   ctx = {
     code, name: meta.n, kessan: meta.e, kijun: meta.k,
@@ -293,7 +300,9 @@ async function load() {
       <tr><td>自己株式数</td><td class="n">${fmt(treasury)}</td></tr>
       <tr><td>単元未満株式</td><td class="n">${fmt(chk.odd)}</td></tr>
     </table>` +
-    (units ? "" : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
+    (units
+      ? `<p class="note">議決権株式数は、議決権の個数 × 単元株式数${unitSize}株で出しています。</p>`
+      : `<p class="note">議決権の個数がまだ取得できていないため、発行済−自己株式で代用しています。</p>`) +
     (chk.problems.length ? `<p class="note" style="color:var(--todo)">${chk.problems.map(esc).join("<br>")}</p>` : "");
 
   // 有報から拾えた会社のサイトを、IRの欄に先に入れておく。

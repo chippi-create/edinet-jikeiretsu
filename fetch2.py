@@ -210,6 +210,22 @@ SOLO_ITEMS = [
     ("中間配当", [r"^InterimDividendPaidPerShareSummaryOfBusinessResults$"]),
 ]
 
+# 【株式の総数等】から取る項目。
+#
+# ここだけ文脈の付き方が違う。「提出日現在」(FilingDateInstant)だったり、
+# 株式の種類(OrdinaryShareMember)が付いたりする。
+# 通常の年度の並びに混ぜられないので、別に扱って当期の欄に入れる。
+#
+# 単元株式数はXBRLに無いと思っていたが、あった。
+# 最初のprobeで UnitOfShares / SharesPerUnit などを探して見つからず、
+# 「上場会社は100株」と決め打ちにしていた。正しい要素名は
+# NumberOfSharesConstitutingOneUnit（一単元の株式数）。
+COVER_ITEMS = [
+    ("単元株式数", [r"^NumberOfSharesConstitutingOneUnit$"]),
+    ("発行済株式総数_期末",
+     [r"^NumberOfIssuedSharesAsOfFiscalYearEndIssuedSharesTotalNumberOfSharesEtc$"]),
+]
+
 NULLS = ("", "-", "－", "―", "NA")
 
 
@@ -339,6 +355,29 @@ def normalize(text):
                 break
         if got:
             data[label] = {y: {"値": v, "基準": "単体"} for y, v in got.items()}
+
+    # 【株式の総数等】。文脈の付き方が通常と違うので、当期の欄に入れる。
+    # 同じ要素が種類株ごとに複数行あることがあるため、最初の1つだけ採る。
+    for label, pats in COVER_ITEMS:
+        if label in data:
+            continue
+        for pat in pats:
+            hit = None
+            for r in rows:
+                ctx = r["コンテキストID"]
+                if not (ctx.startswith("FilingDateInstant")
+                        or ctx.startswith("CurrentYearInstant")):
+                    continue
+                if re.match(pat, r["要素ID"].split(":")[-1]) is None:
+                    continue
+                v = (r["値"] or "").strip()
+                if v in NULLS:
+                    continue
+                hit = v
+                break
+            if hit is not None:
+                data[label] = {base: {"値": hit, "基準": "株式の総数等"}}
+                break
 
     return meta, data
 

@@ -329,10 +329,13 @@ const SLOT_LABEL = {
 };
 
 // 1回で全部書かせると26秒の上限を超えて504になる。項目を分けて並行に投げる。
+// 実測: 3項目でも、長文を書く組み合わせだと28秒かかった（上限すれすれ）。
+// 長くなる既存事業・新規事業は2項目で1組にしてある。
 const SLOT_GROUPS = [
-  ["mgmtSummary", "stockView", "growthView"],
-  ["story", "useOfFunds", "whyMethod"],
-  ["segExisting", "segNew", "points"],
+  ["mgmtSummary", "stockView", "growthView"],   // 各1文。6秒
+  ["story", "useOfFunds", "whyMethod"],         // 各3点。14秒
+  ["segExisting", "segNew"],                    // 長文。ここが重い
+  ["points"],
 ];
 
 $("ai").onclick = async () => {

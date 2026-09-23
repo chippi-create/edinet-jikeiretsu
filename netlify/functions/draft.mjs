@@ -12,12 +12,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 
 const MODEL = "claude-opus-5";
-// 1社の下書きは3回に分けて呼ぶので、社数の3倍を見込んでおく。
-const DAILY_LIMIT = Number(process.env.DRAFT_DAILY_LIMIT || 30);
+// 1社の下書きは4回に分けて呼ぶので、社数の4倍を見込んでおく。
+const DAILY_LIMIT = Number(process.env.DRAFT_DAILY_LIMIT || 40);
 const MAX_MATERIAL = 60000;   // 貼り付け資料の上限。これを超えたら切る。
 
 // Netlifyの関数は26秒で打ち切られる。
 // 9項目を1回で書かせると30秒を超えて504になったため、
+// また3項目でも長文を書く組み合わせでは28秒かかったため、
 // 呼ぶ側が項目を分けて並行に投げる前提にしてある。
 // 1回あたりの項目数を増やすときは、実測してから増やすこと。
 const MAX_SLOTS = Number(process.env.DRAFT_MAX_SLOTS || 4);

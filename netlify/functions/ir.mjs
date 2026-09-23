@@ -25,7 +25,7 @@ const TIMEOUT = 10000;
 const MAX_HTML = 5 * 1024 * 1024;
 const MAX_PDF = 25 * 1024 * 1024;
 const MAX_TEXT = 120000;
-const MAX_FETCH = 10;      // 1回の探索で叩く上限。相手に負担をかけないため。
+const MAX_FETCH = 16;      // 1回の探索で叩く上限。相手に負担をかけないため。
 const BUDGET = 18000;      // 全体の持ち時間。関数の上限(26秒)より手前で切り上げる。
 
 // IRページ・IR用JSらしさの見分け方。会社ごとにばらばらなので広めに取る。
@@ -112,6 +112,25 @@ function findDate(s) {
   if (!m) return null;
   const p = (v) => String(v).padStart(2, "0");
   return `${m[1]}-${p(m[2])}-${p(m[3])}`;
+}
+
+/**
+ * たどる順番を決める点数。高いものから見に行く。
+ *
+ * 何も考えずに出てきた順で追うと、会社案内やガバナンスのページで
+ * 上限を使い切ってしまい、肝心の資料までたどり着けなかった。
+ * 資料の実体を持っているのは、IR用のJSと配信元のJSなので、そこを先に見る。
+ */
+function score(url) {
+  const u = url.toLowerCase();
+  let n = 0;
+  if (/\.js(\?|$)/.test(u)) n += 8;                       // JSが資料の実体を持っている
+  if (/eir-parts|pronexus|net-ir|irwebsite|nikkei|qri/.test(u)) n += 8;  // 配信元
+  if (/\/parts\//.test(u)) n += 4;
+  if (/tanshin|material|press|library|kessan|setsumei|presentation/.test(u)) n += 4;
+  if (/chuki|chukei|plan|vision|meeting|yuho|report/.test(u)) n += 2;
+  if (/governance|faq|calendar|policy|disclaimer|contact|strength|news/.test(u)) n -= 6;
+  return n;
 }
 
 function classify(title) {
@@ -291,10 +310,13 @@ export default async (req) => {
     }
 
     if (depth < 2) {
-      const nexts = nextLinks(text, r.url, isHTML)
-        .filter((u) => !visited.includes(u))
-        .slice(0, isHTML && depth === 0 ? 5 : 4);
-      for (const u of nexts) queue.push({ url: u, depth: depth + 1 });
+      for (const u of nextLinks(text, r.url, isHTML)) {
+        if (visited.includes(u) || queue.some((q) => q.url === u)) continue;
+        queue.push({ url: u, depth: depth + 1 });
+      }
+      // 点数の高いものから見に行く。浅いほうを少し優先する。
+      queue.sort((a, b) => (score(b.url) - b.depth) - (score(a.url) - a.depth));
+      queue = queue.slice(0, 24);
     }
   }
 

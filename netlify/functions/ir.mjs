@@ -148,6 +148,31 @@ function score(url) {
   return n;
 }
 
+/**
+ * 題名やページの中に日付が無いとき、URLから拾う。
+ *
+ * 適時開示のPDFはファイル名に提出日が入っている。
+ *   140120260805510138.pdf → 1401（書類の種類）+ 20260805（提出日）+ 連番
+ * 「決算短信（PDF）835KB」のように題名が定型で、日付が表の別の列にある
+ * サイトでは、これが唯一の手がかりになる。
+ */
+function dateFromURL(url) {
+  let path;
+  try { path = new URL(url).pathname; } catch { return null; }
+  const ok = (y, m, d) => (m >= 1 && m <= 12 && d >= 1 && d <= 31)
+    ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  // 20260805 のように続いているもの。いちばん後ろを採る（連番と紛れにくい）。
+  const runs = [...path.matchAll(/(20\d{2})(\d{2})(\d{2})/g)];
+  for (const m of runs.reverse()) {
+    const v = ok(m[1], Number(m[2]), Number(m[3]));
+    if (v) return v;
+  }
+  // /2026/08/05/ のように区切られているもの。
+  const sep = /(20\d{2})[\/\-_](\d{1,2})[\/\-_](\d{1,2})(?![\d])/.exec(path);
+  if (sep) return ok(sep[1], Number(sep[2]), Number(sep[3]));
+  return null;
+}
+
 function classify(title) {
   // 題名が「〜のお知らせ」で終わるものは、資料ではなく告知。
   // これを外さないと、28ページの決算説明資料より1ページの告知が先に並ぶ。
@@ -177,7 +202,8 @@ function fromHTML(html, base) {
     if (cut >= 0) before = before.slice(cut);
     out.push({
       url: u.toString(), title: title || "（題名なし）",
-      date: findDate(title) || findDate(strip(before)), kind: classify(title),
+      date: findDate(title) || findDate(strip(before)) || dateFromURL(u.toString()),
+      kind: classify(title),
     });
   }
   return out;
@@ -212,7 +238,8 @@ function fromJSON(text) {
       const words = strs.filter((v) => /[^\d\s\/:.\-]/.test(v));
       const title = words.sort((a, b) => b.length - a.length)[0] || "（題名なし）";
       const date = findDate(node.date) || findDate(node.format_date)
-        || findDate(strs.find((s) => findDate(s)) || "");
+        || findDate(strs.find((s) => findDate(s)) || "")
+        || dateFromURL(links[0]);
       for (const url of links) {
         const u = safeURL(url);
         if (!u) continue;

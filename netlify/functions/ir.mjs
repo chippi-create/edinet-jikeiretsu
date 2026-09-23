@@ -189,10 +189,13 @@ function fromJSON(text) {
     if (links.length) {
       const strs = Object.entries(node)
         .filter(([k, v]) => typeof v === "string" && v.length > 4 && !isPdf(v)
-                && !/^https?:/.test(v) && !/^\d+$/.test(v) && !/_size$/.test(k))
+                && !/^https?:/.test(v) && !/_size$/.test(k))
         .map(([, v]) => v);
-      // 題名は「いちばん長い文字列」で当たる。日付や数字は上で外してある。
-      const title = strs.sort((a, b) => b.length - a.length)[0] || "（題名なし）";
+      // 題名は「いちばん長い文字列」で当たるが、日付時刻の文字列
+      //（"2026/09/14 13:40:00"）が題名より長いことがあり、それを拾ってしまった。
+      // 数字と記号だけのものは題名ではないので外す。
+      const words = strs.filter((v) => /[^\d\s\/:.\-]/.test(v));
+      const title = words.sort((a, b) => b.length - a.length)[0] || "（題名なし）";
       const date = findDate(node.date) || findDate(node.format_date)
         || findDate(strs.find((s) => findDate(s)) || "");
       for (const url of links) {

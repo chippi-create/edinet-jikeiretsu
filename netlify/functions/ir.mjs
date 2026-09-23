@@ -297,6 +297,33 @@ function eirSiblings(url) {
   return out;
 }
 
+/**
+ * 宝印刷（xj-storage）の一覧。ここもコードだけで叩ける。
+ *   https://www.xj-storage.jp/public-list/GetList2.aspx?company=<コード>0&len=10000
+ * 会社コードは証券コードの後ろに0を足した5桁。
+ * 返ってくるのはXMLで、題名・公表日・PDFのURLが入っている。
+ */
+function xjSeed(code) {
+  return `https://www.xj-storage.jp/public-list/GetList2.aspx?company=${code}0&len=10000`;
+}
+
+/** 宝印刷のXMLから資料を拾う。<item>ごとに題名・日付・PDFが並ぶ。 */
+function fromXML(text) {
+  const out = [];
+  for (const chunk of String(text).split("<item>").slice(1)) {
+    const title = (/<title>([\s\S]*?)<\/title>/.exec(chunk) || [])[1];
+    const date = findDate((/<publishDate>([^<]*)<\/publishDate>/.exec(chunk) || [])[1]);
+    for (const m of chunk.matchAll(/url="([^"]+\.pdf[^"]*)"/gi)) {
+      const u = safeURL(unesc(m[1]));
+      if (!u) continue;
+      const page = (/page="(\d+)"/.exec(chunk) || [])[1] || null;
+      const t = strip(title || "").slice(0, 120) || "（題名なし）";
+      out.push({ url: u.toString(), title: t, date, kind: classify(t), pages: page });
+    }
+  }
+  return out;
+}
+
 /** 次にたどる先。同じ会社のIRページと、IR用のJS。 */
 function nextLinks(text, base, isHTML) {
   const host = new URL(base).hostname;
@@ -386,6 +413,7 @@ export default async (req) => {
   const code = String(body.code || "").trim();
   if (/^[0-9A-Za-z]{4}$/.test(code)) {
     for (const u of eirSeeds(code)) queue.unshift({ url: u, depth: 0, sibling: true });
+    queue.unshift({ url: xjSeed(code), depth: 0, sibling: true });
   }
 
   // URLを指定されていないときだけ、欲しいものが取れたら会社のページは見に行かない。
@@ -406,9 +434,13 @@ export default async (req) => {
     if (r.error) { notes.push(`${url}: ${r.error}`); continue; }
 
     const text = decode(r.buf, r.type);
-    const isHTML = /html/i.test(r.type) || /^\s*<(!doctype|html)/i.test(text);
+    const isXML = /^\s*<\?xml/i.test(text) && /<item>/i.test(text);
+    const isHTML = !isXML
+      && (/html/i.test(r.type) || /^\s*<(!doctype|html)/i.test(text));
 
-    for (const d of (isHTML ? fromHTML(text, r.url) : fromJSON(text))) {
+    const found = isXML ? fromXML(text)
+      : isHTML ? fromHTML(text, r.url) : fromJSON(text);
+    for (const d of found) {
       if (!docs.has(d.url)) docs.set(d.url, d);
     }
     // JSでもHTMLのリンクが書かれていることがあるので、両方見る。

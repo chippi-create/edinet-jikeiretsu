@@ -27,7 +27,7 @@ TPL_PATH = os.path.join(HERE, "template.html")
 SECTION_FILES = {
     "biz": (os.path.join(HERE, "data", "business.csv"), ["本文"]),
     "div": (os.path.join(HERE, "data", "dividend.csv"), ["本文"]),
-    "web": (os.path.join(HERE, "data", "websites.csv"), ["ホスト"]),
+    "web": (os.path.join(HERE, "data", "websites.csv"), ["ホスト", "出現回数"]),
     "seg": (os.path.join(HERE, "data", "segments.csv"),
             ["セグメント", "外部顧客への売上高", "セグメント利益", "単位"]),
     "own": (os.path.join(HERE, "data", "ownership.csv"),
@@ -58,6 +58,54 @@ EXTRA = ["発行済株式数", "議決権の個数", "自己株式数", "単体_
 # 日本基準の「主要な経営指標等の推移」に営業利益の欄がないため、
 # 損益計算書本体から補っている。本表は当期・前期しかないので2年分になる。
 NOTE_2Y = {"営業利益", "売上高"}
+
+
+# 会社のサイトではないと分かっているドメイン。
+#
+# 会社のサイトは有報の本文に出てくるURLから推定しているが、
+# 自社のURLを書いていない会社では、本文中の他のURLを拾ってしまう。
+# 実例：ノイルイミューン・バイオテック(4893)は、論文のプレプリントサーバー
+# biorxiv.org が1回だけ出てきて、それが会社のサイトとして記録されていた。
+#
+# ドメイン単位の完全一致で見る。部分一致にすると
+# 「group.com」が「oup.com」に、朝日工業社が「asahi」に当たってしまう。
+#
+# なお、この一覧に当たっても消さない。アイティメディア(2148)やnote(5243)の
+# ように、その会社自身がそのドメインの持ち主であることがある。
+# 印を付けて、使う側に確かめてもらう。
+NOT_COMPANY = {
+    # 論文・学術
+    "biorxiv.org", "medrxiv.org", "arxiv.org", "nih.gov", "nature.com",
+    "science.org", "springer.com", "springernature.com", "sciencedirect.com",
+    "elsevier.com", "wiley.com", "researchgate.net", "mdpi.com",
+    "frontiersin.org", "plos.org", "oup.com", "jst.go.jp",
+    # 広報配信・報道
+    "prtimes.jp", "atpress.ne.jp", "kyodonews.jp", "nikkei.com", "asahi.com",
+    "yomiuri.co.jp", "mainichi.jp", "sankei.com", "toyokeizai.net",
+    "bloomberg.com", "reuters.com", "forbes.com", "itmedia.co.jp", "impress.co.jp",
+    # 市場・開示インフラ
+    "jpx.co.jp", "tse.or.jp", "xj-storage.jp", "eir-parts.net", "pronexus.co.jp",
+    "net-ir.ne.jp", "jasdec.com", "jsda.or.jp", "irbank.net", "kabutan.jp",
+    "minkabu.jp", "morningstar.co.jp", "quick.co.jp", "takara-dds.co.jp",
+    "nikkei4946.com",
+    # 国際機関・枠組み
+    "un.org", "unfccc.int", "fsb-tcfd.org", "globalreporting.org", "cdp.net",
+    "iso.org", "sasb.org", "unglobalcompact.org", "sbti.org",
+    # 一般サービス
+    "wikipedia.org", "wikimedia.org", "github.com", "gitlab.com", "adobe.com",
+    "apple.com", "amazon.com", "amazonaws.com", "microsoft.com", "cloudflare.com",
+    "facebook.com", "instagram.com", "linkedin.com", "note.com", "ameblo.jp",
+    "hatena.ne.jp", "qiita.com",
+}
+
+
+def not_company(host):
+    p = host.lower().split(".")
+    if len(p) >= 3 and p[-2] in ("co", "or", "ne", "go", "ac", "lg") and p[-1] == "jp":
+        base = ".".join(p[-3:])
+    else:
+        base = ".".join(p[-2:])
+    return base in NOT_COMPANY
 
 
 def bucket_of(sec):
@@ -98,6 +146,9 @@ def load_sections():
                 vals = [r.get(c, "") for c in cols]
                 if key == "own":
                     vals[0] = norm_category(vals[0])
+                if key == "web":
+                    # 会社のサイトかどうかの確からしさを添える。
+                    vals.append("?" if not_company(vals[0]) else "")
                 out[sec].setdefault(key, []).append(vals)
                 if r.get("基準日"):
                     kijun.setdefault(sec, {})[key] = r["基準日"]

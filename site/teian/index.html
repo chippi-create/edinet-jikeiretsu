@@ -265,14 +265,25 @@ async function load() {
     (chk.problems.length ? `<p class="note" style="color:var(--todo)">${chk.problems.map(esc).join("<br>")}</p>` : "");
 
   // 有報から拾えた会社のサイトを、IRの欄に先に入れておく。
-  // 95%の会社は分かる。分からない会社は自分で入れてもらう。
-  const host = (sec.web || [])[0]?.[0];
+  //
+  // これは本文に出てくるURLからの推定でしかない。自社のURLを書いていない
+  // 会社では、論文サイトや配信業者を拾ってしまう。確からしさを一緒に出して、
+  // 目で確かめてもらう。黙って使わせない。
+  const w = (sec.web || [])[0] || [];
+  const host = w[0], times = Number(w[1] || 0), suspect = w[2] === "?";
   $("irurl").value = host ? `https://${host}/` : "";
   $("irurl").placeholder = host
     ? "" : "この会社のサイトは有報から拾えませんでした。IRページのURLを入れてください";
-  $("irhint").textContent = host
-    ? "有報から拾ったサイトです。IRページのURLに書き換えると、より確実に見つかります。"
-    : "この会社のサイトは有報から拾えなかったので、IRページのURLを入れてください。";
+  $("irhint").innerHTML = !host
+    ? "この会社のサイトは有報から拾えなかったので、IRページのURLを入れてください。"
+    : suspect
+      ? `<b style="color:var(--todo)">${esc(host)} は会社のサイトではなさそうです。</b>` +
+        `有報の本文に出てきただけのURLかもしれません。正しいIRページのURLに書き換えてください。`
+      : times <= 1
+        ? `${esc(host)} は有報に1回しか出てこなかったホストです。` +
+          `違っていたら書き換えてください。`
+        : `有報に${times}回出てきた ${esc(host)} を入れました。` +
+          `IRページのURLに書き換えると、より確実に見つかります。`;
 
   shList = shareholders(sec.sh);
   $("shlist").innerHTML = shList.length

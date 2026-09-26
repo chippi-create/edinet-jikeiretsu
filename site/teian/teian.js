@@ -329,10 +329,19 @@ function pageCash(ctx) {
   const x = (v, n = 1) => v === null ? "—" : `${v.toFixed(n)}倍`;
 
   const items = [];
-  items.push(
-    `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶん。` +
-    `事業を回すのに${y(h.need)}、1年内の借入返済に${y(h.within1y)}を置くと、` +
-    `**自由に使えるのは${y(h.free)}**。`);
+  const thin = h.free !== null && h.free < 0;
+  // 「月商×1.5ヶ月」は中小型株の目安で、売上規模の大きい会社には当てはまらない。
+  // ニッスイ（売上9,300億・現預金242億）だと「自由に使える現金 −921億円」と出て、
+  // 数字としては正しくても、結論としては間違っている。
+  // 手元が薄い会社は、運転資本を仕入債務と借入で回しているだけなので、
+  // 余剰を負で言い切らず、状態の説明に変える。
+  items.push(thin
+    ? `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶんで、` +
+      `事業規模に対して薄い。運転資本${y(a.wc.wc)}は仕入債務と借入で回しており、` +
+      `**現預金に取り崩せる余剰は無い**。`
+    : `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶん。` +
+      `事業を回すのに${y(h.need)}、1年内の借入返済に${y(h.within1y)}を置くと、` +
+      `**自由に使えるのは${y(h.free)}**。`);
   if (c.days !== null) {
     items.push(
       `仕入れてから現金として戻るまで${dd(c.days)}かかる（売上債権${dd(c.dso)}＋` +
@@ -354,7 +363,10 @@ function pageCash(ctx) {
     {
       no: 5,
       title: "資金の余力",
-      lead: `現預金${y(h.cash)}のうち、自由に使えるのは${y(h.free)}`,
+      lead: thin
+        ? `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶん。` +
+          `取り崩せる余剰は無く、投資には調達が要る`
+        : `現預金${y(h.cash)}のうち、自由に使えるのは${y(h.free)}`,
       blocks: [{ items: items.slice(0, 2) }],
       tables: [
         {
@@ -365,7 +377,7 @@ function pageCash(ctx) {
             ["月商", y(h.monthly)],
             [`− 事業に要る手元資金（月商×${a.opts.monthsOfSales}ヶ月）`, y(h.need)],
             ["− 1年内に返す借入", y(h.within1y)],
-            ["＝ 自由に使える現金", y(h.free)],
+            [thin ? "＝ 不足（取り崩せる余剰は無い）" : "＝ 自由に使える現金", y(h.free)],
           ],
           pick: 4,
         },
@@ -383,6 +395,9 @@ function pageCash(ctx) {
       notes: [
         `前提：事業に要る手元資金＝月商×${a.opts.monthsOfSales}ヶ月。` +
         "棚卸資産と仕入債務の日数は売上原価で割っています（売上高で割ると粗利のぶん短く出ます）。",
+        "月商×◯ヶ月は中小型株の目安です。売上規模の大きい会社は手元を厚く持たず、" +
+        "コミットメントライン等で回していることがあります。枠の有無は有価証券報告書から" +
+        "取れないので、この計算には入っていません。前提の月数は画面で変えられます。",
       ],
     },
     {

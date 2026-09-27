@@ -204,6 +204,7 @@ import { buildProposal, shareholders, stableRatio, pageText, countTodo } from ".
 import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts } from "./shindan.js";
+import { jigyoBlock } from "./jigyo.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -502,7 +503,15 @@ function tableHTML(t) {
 }
 
 function render() {
-  $("out").innerHTML = `<h2>提案内容</h2>` + pages.map((p, idx) => `
+  // 提案書のサマリーは各段1行。詳しい三段は、話す前に読む下書きとしてここに出す。
+  const jb = jigyoBlock(ctx);
+  const jtext = [jb.head, ...jb.subs.flatMap((b) => [b.head, ...b.items.map((i) => "・" + i)])].join("\n");
+  $("out").innerHTML = `<h2>＜事業の状況＞の下書き（詳細）</h2>
+    <div class="page">${blocksHTML(jb.subs)}
+      <p class="note">提案書のエグゼクティブサマリーには、これを各段1行に縮めたものが入ります。</p>
+      <div class="tools" style="margin-top:10px"><button class="ghost" id="jcopy">この下書きをコピー</button>
+      <span class="ok" id="jmsg"></span></div></div>` +
+    `<h2>提案内容</h2>` + pages.map((p, idx) => `
     <div class="page">
       <h3>${esc(p.title)}<span class="pno">p.${p.no}</span></h3>
       ${p.lead ? `<div class="lead">➤ ${markTodo(p.lead)}</div>` : ""}
@@ -514,6 +523,7 @@ function render() {
         <span class="ok" id="m${idx}"></span>
       </div>
     </div>`).join("");
+  $("jcopy").onclick = () => copy(jtext, $("jmsg"));
   for (const b of $("out").querySelectorAll("[data-t]")) {
     b.onclick = () => copy(pageText(pages[Number(b.dataset.t)]), $("m" + b.dataset.t));
   }
@@ -681,6 +691,7 @@ $("material").addEventListener("change", () => readTanshin(false));
 
 const SLOT_LABEL = {
   bizDriver: "これまでの業績：何で伸びたか", chukeiFocus: "今後の方向性：中計で注力・改善すること",
+  bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   stockView: "株価の状況の結論",
   growthView: "財務と投資計画の方向性", story: "資本政策の背景",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
@@ -693,11 +704,12 @@ const SLOT_LABEL = {
 // 長くなる既存事業・新規事業は2項目で1組にしてある。
 const SLOT_GROUPS = [
   // サマリーの＜事業の状況＞①（何で伸びたか）は2〜3文なので、1文の2つと組む。
-  ["bizDriver", "stockView", "growthView"],
+  // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
+  ["bizDriver", "stockView", "growthView", "bizDriverShort"],
   ["story", "useOfFunds", "whyMethod"],         // 各3点。14秒
   ["segExisting", "segNew"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。
-  ["points", "chukeiFocus"],
+  ["points", "chukeiFocus", "chukeiShort"],
 ];
 
 $("ai").onclick = async () => {

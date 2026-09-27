@@ -207,3 +207,115 @@ export function jigyoBlock(ctx) {
     ],
   };
 }
+
+// ---- 提案書用の1行版 ------------------------------------------------------
+//
+// 上の三段は画面で読む下書き（詳細）。提案書のエグゼクティブサマリーには、
+// 各段を1行に縮めたものを入れる（本人の指定）。
+// 要因と中計の方向性は、AIの短い版（bizDriverShort / chukeiShort）を使う。
+
+/** ①を1行に。売上の伸び・営業利益の状態・要因・キャッシュの結果。 */
+function compactPast(ctx) {
+  const s = ser(ctx.fin["売上高"], 3);
+  const o = ser(ctx.fin["営業利益"], 3);
+  const parts = [];
+  if (s.length >= 2 && s[0][1] > 0 && s[s.length - 1][1] > 0) {
+    const cagr = Math.pow(s[s.length - 1][1] / s[0][1], 1 / (s.length - 1)) - 1;
+    parts.push(`売上高は年率${signPct(cagr)}`);
+  }
+  if (o.length) {
+    const b = o[o.length - 1][1], a = o.length > 1 ? o[o.length - 2][1] : null;
+    const v = oku(Math.abs(b));
+    parts.push(a === null ? `営業${b < 0 ? "損失" : "利益"}${v}`
+      : a < 0 && b >= 0 ? `営業利益${v}に黒字転換`
+      : a < 0 && b < 0 ? `営業損失${v}に${b > a ? "縮小" : "拡大"}`
+      : a > 0 && b < 0 ? `営業損失${v}に赤字転落`
+      : `営業利益${v}で${b > a ? "増益" : b < a ? "減益" : "横ばい"}`);
+  }
+  const why = draft(ctx, "bizDriverShort");
+  let line = parts.join("、") + (why ? `（${why}）` : TODO("要因を短く")) + "。";
+
+  // キャッシュの結果を短く
+  const get = (k) => ctx.fin[k] ?? ctx.ext[k];
+  const years = ser(get("営業CF"), 3).map((r) => r[0]);
+  const sum = (k) => { let t = 0, g = false; for (const y of years) { const v = num(get(k)?.[y]); if (v !== null) { t += v; g = true; } } return g ? t : null; };
+  const ope = sum("営業CF"), inv = sum("投資CF"), fnc = sum("財務CF");
+  const cash = ser(get("現金及び現金同等物"), 1)[0]?.[1] ?? null;
+  const how = ope === null || inv === null ? null
+    : ope < 0 && inv > 0 ? "営業赤字を資産売却で補い"
+    : ope + inv < 0 && fnc > 0 ? "投資・赤字の不足を借入・増資で補い"
+    : ope + inv >= 0 ? `3期でフリーCF${oku(ope + inv)}を確保し`
+    : null;
+  if (cash !== null) line += `${how ? how + "、" : ""}現預金${oku(cash)}。`;
+  return line;
+}
+
+/** ②を1行に。中計の方向性・中計目標までの距離・足元の進捗。 */
+function compactOutlook(ctx) {
+  const parts = [];
+  const focus = draft(ctx, "chukeiShort");
+  parts.push(focus ? `中計は${focus}` : TODO("中計の方向性を短く"));
+  const t = ctx.tanshin?.forecast || ctx.tanshin?.actual ? ctx.tanshin : null;
+  const ck = ctx.chukei && (ctx.chukei.sales || ctx.chukei.op) ? ctx.chukei : null;
+  if (ck) {
+    const fyOf = (x) => { const m = /(\d{4})/.exec(String(x || "")); return m ? Number(m[1]) : null; };
+    const ys = Object.keys(ctx.fin["売上高"] || {}).sort();
+    const lastY = ys[ys.length - 1];
+    const base = t?.forecast ? t.forecast
+      : { 売上高: mil(ctx.fin["売上高"]?.[lastY]), 営業利益: mil(ctx.fin["営業利益"]?.[lastY]) };
+    const g = chukeiGap(ck, base, t?.forecast ? fyOf(t.period) : fyOf(lastY), ctx.fin);
+    const r = g?.rows.find((x) => x.base > 0 && x.need !== null);
+    if (r) {
+      parts.push(r.need <= 0 ? `${r.item}目標は今期予想で到達`
+        : `${r.item}目標まで${g.years === 1 ? `来期${(r.target / r.base).toFixed(1)}倍` : `年${pct(r.need)}`}の伸びが必要`);
+    }
+  }
+  const pg = progress(t, ctx.fin);
+  const s = pg?.rows.find((x) => x.item === "売上高" && x.verdict);
+  if (s) {
+    const q = pg.q === 2 ? "上期" : `${pg.q}Q`;
+    parts.push(`${q}の売上進捗は${s.verdict}（${pct(s.rate)}）`);
+  }
+  return parts.join("。") + "。";
+}
+
+/** ③を1行に。上位の論点2つと議決権。 */
+function compactAction(ctx) {
+  const parts = [];
+  // 論点ごとの短い言い方。候補の手法の文言をそのまま使うと「→」が二重になって読めない。
+  const profit = num(Object.values(ctx.fin["営業利益"] || {}).slice(-1)[0]) > 0;
+  const SHORT = {
+    capital: "自社株買い・増配", float: "売出し", major: "大株主の売却",
+    crossheld: "政策株式の売却（売出し）",
+    crosshold: profit ? "政策保有株を売却し還元へ" : "保有株を売却し事業資金へ",
+  };
+  for (const i of diagnose(ctx).slice(0, 2)) {
+    const name = i.title.split("：")[0];
+    // 見出しか根拠の1つ目にある最初の%を添える（保有株式なら純資産の38.8%）。
+    const m = /(\d+(?:\.\d+)?%)/.exec(i.title) || /(\d+(?:\.\d+)?%)/.exec(i.evidence[0] || "");
+    const how = SHORT[i.id]
+      || String(i.products[0] || "").replace(/（.*$/, "").replace(/^エクイティ → /, "");
+    const what = { capital: "ROE ", crosshold: "純資産の", major: "筆頭", crossheld: "大株主上位で", float: "推定" }[i.id];
+    parts.push(`${name}${m && what ? `（${what}${m[1]}）` : ""}→${how}`);
+  }
+  const st = ctx.stable;
+  const keep = st?.keep ?? 0.5;
+  if (st?.ratio != null) {
+    const cap = maxDilutionFor(st.ratio, keep);
+    parts.push(cap > 0
+      ? `議決権は${st.label || "安定株主"}${pct(st.ratio)}（${pct(keep, 0)}維持なら希薄化${pct(cap)}まで）`
+      : `議決権は${st.label || "安定株主"}${pct(st.ratio)}（既に${pct(keep, 0)}未満）`);
+  }
+  return parts.length ? parts.join("／") + "。" : TODO("取り組むべきことを1行で");
+}
+
+/** 提案書用の＜事業の状況＞。各段1行。 */
+export function jigyoCompact(ctx) {
+  return {
+    head: "＜事業の状況＞", subs: [
+      { head: "①これまでの業績", items: [compactPast(ctx)] },
+      { head: "②今後の方向性と足元の進捗", items: [compactOutlook(ctx)] },
+      { head: "③取り組むべきこと", items: [compactAction(ctx)] },
+    ],
+  };
+}

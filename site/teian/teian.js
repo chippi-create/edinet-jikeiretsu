@@ -11,7 +11,7 @@ import {
 } from "./sim.js";
 import { analyze } from "./shikin.js";
 import { buildGenjo } from "./genjo.js";
-import { jigyoBlock } from "./jigyo.js";
+import { jigyoCompact } from "./jigyo.js";
 
 // ---- 小道具 --------------------------------------------------------------
 
@@ -192,7 +192,8 @@ function pageSummary(ctx) {
             ],
           },
           // ①これまでの業績 → ②今後と足元 → ③するべきこと、の三段で書く（本人の指定）。
-          jigyoBlock(ctx),
+          // 提案書には各段1行の短い版。詳しい版（jigyoBlock）は画面で下書きとして見せる。
+          jigyoCompact(ctx),
         ],
       },
       {

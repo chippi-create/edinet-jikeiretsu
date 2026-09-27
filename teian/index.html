@@ -89,10 +89,17 @@
     background:var(--field); color:var(--fg); border:1px solid var(--line2);
     border-radius:4px; padding:7px 9px; font:inherit; font-size:14px;
   }
+  /* ボタンの帯は画面の下に固定する。sticky（張り付き）は親要素の範囲でしか効かず、
+     論点の表示を足したあと「途中で消える」と言われた。fixed なら位置に関係なく出る。
+     左右は本文の幅（1040px）にそろえ、本文の下には帯の高さぶんの余白を取る。 */
   .bar {
-    position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
-    padding:10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:var(--bg); border-top:1px solid var(--line);
+    padding:10px max(16px, calc((100vw - 1040px) / 2 + 16px));
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 -2px 6px rgba(0,0,0,0.06);
   }
+  body.hasbar .wrap { padding-bottom:140px; }
 </style>
 </head>
 <body>
@@ -273,6 +280,7 @@ function clearAll() {
   $("basis").classList.add("hide");
   $("step2").classList.add("hide");
   $("bar").classList.add("hide");
+  document.body.classList.remove("hasbar");
   $("pptx").classList.add("hide");
   $("copyall").classList.add("hide");
 }
@@ -381,6 +389,7 @@ async function load() {
 
   $("step2").classList.remove("hide");
   $("bar").classList.remove("hide");
+  document.body.classList.add("hasbar");
   $("loadmsg").textContent = "";
   recalcStable();
   renderShindan();

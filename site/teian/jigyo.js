@@ -157,7 +157,7 @@ function outlookLines(ctx) {
     out.push(`${t.actual.期}累計の売上高は${(t.actual.売上高).toLocaleString("ja-JP")}百万円` +
       (t.prior?.売上高 > 0 ? `（前年同期比${signPct(t.actual.売上高 / t.prior.売上高 - 1)}）。` : "。"));
   } else {
-    out.push(TODO("今期予想に対する足元の進捗（決算短信を読み込むと入ります）"));
+    out.push(TODO("今期予想に対する足元の進捗（決算短信の読み込みで入る）"));
   }
   return out;
 }
@@ -189,7 +189,7 @@ function actionLines(ctx) {
       : `議決権：${st.label || "安定株主"}の議決権比率は${pct(st.ratio)}で既に${pct(keep, 0)}未満。` +
         `希薄化率${pct(ctx.dilution)}の発行で${pct(dilutedRatio(st.ratio, ctx.dilution))}に下がる。`);
   } else {
-    out.push(TODO("議決権：安定株主を選ぶと、維持できる希薄化率が入ります"));
+    out.push(TODO("議決権：安定株主の選択で、維持できる希薄化率が入る"));
   }
   return out;
 }
@@ -233,9 +233,12 @@ function compactPast(ctx) {
       : `営業利益${v}で${b > a ? "増益" : b < a ? "減益" : "横ばい"}`);
   }
   const why = draft(ctx, "bizDriverShort");
-  let line = parts.join("、") + (why ? `（${why}）` : TODO("要因を短く")) + "。";
+  return parts.join("、") + (why ? `（${why}）` : TODO("要因を短く")) + "。" + cashShort(ctx);
+}
 
-  // キャッシュの結果を短く
+/** キャッシュの結果を短い一文に。 */
+function cashShort(ctx) {
+  let line = "";
   const get = (k) => ctx.fin[k] ?? ctx.ext[k];
   const years = ser(get("営業CF"), 3).map((r) => r[0]);
   const sum = (k) => { let t = 0, g = false; for (const y of years) { const v = num(get(k)?.[y]); if (v !== null) { t += v; g = true; } } return g ? t : null; };
@@ -250,11 +253,11 @@ function compactPast(ctx) {
   return line;
 }
 
-/** ②を1行に。中計の方向性・中計目標までの距離・足元の進捗。 */
-function compactOutlook(ctx) {
+/** ②を1行に。中計の方向性・中計目標までの距離・足元の進捗。noFocus なら方向性を除く。 */
+function compactOutlook(ctx, noFocus = false) {
   const parts = [];
   const focus = draft(ctx, "chukeiShort");
-  parts.push(focus ? `中計は${focus}` : TODO("中計の方向性を短く"));
+  if (!noFocus) parts.push(focus ? `中計は${focus}` : TODO("中計の方向性を短く"));
   const t = ctx.tanshin?.forecast || ctx.tanshin?.actual ? ctx.tanshin : null;
   const ck = ctx.chukei && (ctx.chukei.sales || ctx.chukei.op) ? ctx.chukei : null;
   if (ck) {
@@ -276,11 +279,11 @@ function compactOutlook(ctx) {
     const q = pg.q === 2 ? "上期" : `${pg.q}Q`;
     parts.push(`${q}の売上進捗は${s.verdict}（${pct(s.rate)}）`);
   }
-  return parts.join("。") + "。";
+  return parts.length ? parts.join("。") + "。" : null;
 }
 
-/** ③を1行に。上位の論点2つと議決権。 */
-function compactAction(ctx) {
+/** ③を1行に。上位の論点2つと議決権。asList なら行ごとに返す。 */
+function compactAction(ctx, asList = false) {
   const parts = [];
   // 論点ごとの短い言い方。候補の手法の文言をそのまま使うと「→」が二重になって読めない。
   const profit = num(Object.values(ctx.fin["営業利益"] || {}).slice(-1)[0]) > 0;
@@ -306,6 +309,7 @@ function compactAction(ctx) {
       ? `議決権は${st.label || "安定株主"}${pct(st.ratio)}（${pct(keep, 0)}維持なら希薄化${pct(cap)}まで）`
       : `議決権は${st.label || "安定株主"}${pct(st.ratio)}（既に${pct(keep, 0)}未満）`);
   }
+  if (asList) return parts.length ? parts.map((x) => x + "。") : [TODO("取り組むべきこと")];
   return parts.length ? parts.join("／") + "。" : TODO("取り組むべきことを1行で");
 }
 
@@ -316,6 +320,30 @@ export function jigyoCompact(ctx) {
       { head: "①これまでの業績", items: [compactPast(ctx)] },
       { head: "②今後の方向性と足元の進捗", items: [compactOutlook(ctx)] },
       { head: "③取り組むべきこと", items: [compactAction(ctx)] },
+    ],
+  };
+}
+
+/**
+ * 提案書用の＜事業の状況＞（中くらいの長さ）。
+ * 1行版は「短すぎる」、詳しい版は1枚に入らない。各段2〜3行にする（本人の指定）。
+ *   ① 3期の推移 → 何で伸びたか（下書きの長い版）→ キャッシュの結果
+ *   ② 中計の注力・改善（2点まで）→ 中計までの距離と足元の進捗
+ *   ③ 上位の論点2つ → 議決権
+ */
+export function jigyoMid(ctx) {
+  const why = draft(ctx, "bizDriver") || draft(ctx, "bizDriverShort")
+    || TODO("売上・利益が何で伸びたか");
+  const focus = draft(ctx, "chukeiFocus");
+  const focusLines = focus
+    ? focus.split(/\r?\n/).map((x) => x.replace(/^[・\-\s]+/, "").trim()).filter(Boolean).slice(0, 2)
+    : [draft(ctx, "chukeiShort") ? `中計は${draft(ctx, "chukeiShort")}。` : TODO("中計で注力すること・改善すること")];
+  const cash = cashShort(ctx);
+  return {
+    head: "＜事業の状況＞", subs: [
+      { head: "①これまでの業績", items: [trendLine(ctx.fin, ctx.kessan), why, cash || null].filter(Boolean) },
+      { head: "②今後の方向性と足元の進捗", items: [...focusLines, compactOutlook(ctx, true)].filter(Boolean) },
+      { head: "③取り組むべきこと", items: compactAction(ctx, true) },
     ],
   };
 }

@@ -83,6 +83,18 @@ export function buildPptx(pages, PptxGenJS) {
       y += 0.54;
     }
 
+    // 左右2段（エグゼクティブサマリー）。1つ目のブロックを左、残りを右に置く。
+    if (p.layout === "split") {
+      const H = Math.min(6.65, notesTop(p) - 0.08) - y;
+      const box = (blocks, x) => s.addText(flatten(blocks).map((r) =>
+        ({ text: r.text, options: { ...r.options, fontSize: 10 } })),
+        { x, y, w: 6.1, h: H, fontFace: FONT, color: FG, valign: "top", lineSpacingMultiple: 1.1 });
+      box((p.blocks || []).slice(0, 1), 0.48);
+      box((p.blocks || []).slice(1), 6.9);
+      footer(s, p);
+      continue;
+    }
+
     // 4つの枠を2×2に並べるページ（バックアッププラン）。1枚に収めるための組み方。
     if (p.layout === "grid4") {
       grid4(s, p, y);
@@ -94,12 +106,14 @@ export function buildPptx(pages, PptxGenJS) {
     const tables = p.tables || [];
     const twoCol = lines.length > 0 && tables.length > 0;
     const colW = twoCol ? 6.1 : 12.4;
-    const BOTTOM = 6.65;   // ここから下は注記とページ番号の場所
+    // 注記が複数行だと上に伸びて表に重なった（現状②）。注記の行数から高さを出し、
+    // 表と文章はその上までに収める。
+    const BOTTOM = Math.min(6.65, notesTop(p) - 0.08);
 
     // 文章の高さのあたり。11ptで1行あたり0.22インチ、幅で折り返す。
     const textH = twoCol
       ? Math.min(5.6, lines.reduce((a, l) =>
-          a + 0.22 * Math.max(1, Math.ceil(l.text.length / 26)), 0.1))
+          a + 0.22 * Math.max(1, Math.ceil(textWidth(l.text) / 36)), 0.1))   // 11ptで幅6.1インチに全角およそ36字
       : 0;
 
     if (lines.length) {
@@ -110,7 +124,7 @@ export function buildPptx(pages, PptxGenJS) {
     // 表は右の段から入れ、入りきらなければ左の段の文章の下へ回す。
     // 資金のページのように表が4つあると、1段では必ずあふれる。
     const cols = twoCol
-      ? [{ x: 6.9, y }, { x: 0.48, y: y + textH + 0.15 }]
+      ? [{ x: 6.9, y }, { x: 0.48, y: y + textH + 0.3 }]
       : [{ x: 0.48, y }];
     let ci = 0;
     const dropped = [];
@@ -145,8 +159,8 @@ export function buildPptx(pages, PptxGenJS) {
     }
     // 入りきらなかった表は、黙って消さずに名前だけ残す。
     if (dropped.length) {
-      s.addText(`※ 紙面に入りきらなかった表：${dropped.join("、")}（画面で確認してください）`,
-        { x: 0.48, y: BOTTOM, w: 12.4, h: 0.24, fontSize: 8, color: SOFT, fontFace: FONT });
+      s.addText(`※ 紙面に入りきらなかった表：${dropped.join("、")}（画面で確認）`,
+        { x: 0.48, y: BOTTOM - 0.24, w: 12.4, h: 0.22, fontSize: 8, color: SOFT, fontFace: FONT });
     }
 
     footer(s, p);
@@ -154,12 +168,22 @@ export function buildPptx(pages, PptxGenJS) {
   return pptx;
 }
 
+/** 注記の行数。8ptで幅12.4インチに全角およそ110字。 */
+function notesLines(p) {
+  return (p.notes || []).reduce((a, x) => a + Math.max(1, Math.ceil(textWidth("※ " + x) / 110)), 0);
+}
+/** 注記の上端。下端（7.05インチ）から行数ぶん上に伸ばす。 */
+function notesTop(p) {
+  return 7.05 - 0.15 * notesLines(p);
+}
+
 /** 注記とページ番号。 */
 function footer(s, p) {
   const notes = (p.notes || []).map((x) => "※ " + x).join("\n");
   if (notes) {
-    s.addText(notes, { x: 0.48, y: 6.72, w: 12.4, h: 0.42, fontSize: 8,
-      color: SOFT, fontFace: FONT, valign: "bottom" });
+    const top = notesTop(p);
+    s.addText(notes, { x: 0.48, y: top, w: 12.4, h: 7.05 - top, fontSize: 8,
+      color: SOFT, fontFace: FONT, valign: "top", margin: 0 });
   }
   // 番号が【ページ番号】のままだと幅1インチでは2行に折れる。幅を取って中央に置く。
   s.addText(String(p.no), { x: 5.67, y: 7.08, w: 2, h: 0.26, fontSize: 10,
@@ -171,7 +195,7 @@ function footer(s, p) {
  * 表は4つ目の枠の中に「項目 値」の行として入れる（表を別に置く場所が無いため）。
  */
 function grid4(s, p, top) {
-  const W = 6.1, GAP = 0.2, BOTTOM = 6.62;
+  const W = 6.1, GAP = 0.2, BOTTOM = Math.min(6.62, notesTop(p) - 0.08);
   const H = (BOTTOM - top - GAP) / 2;
   const blocks = (p.blocks || []).slice(0, 4).map((b) => ({ ...b, items: [...(b.items || [])] }));
   const last = blocks[blocks.length - 1];

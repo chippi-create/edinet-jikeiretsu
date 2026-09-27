@@ -156,6 +156,17 @@ export function profile(ctx) {
   // 年の列は、どの会社にもある自己資本比率・純資産から取る（売上もROEも無い創薬で空になった）。
   const years = series(fin["自己資本比率"] || fin["純資産"] || fin["ROE"], 3).map((r) => r[0]);
   const at = (k, y) => num((fin[k] ?? ext[k])?.[y]);
+  // 有利子負債は有報の貸借対照表から取るので当期・前期の2年分しか無い。
+  // 借入の科目がどの年にも無い会社（無借金）は、現預金＝ネットキャッシュとして全年出す。
+  // 借入がある会社で、その年の借入が取れていなければ「—」にする（0と書くと無借金に見える）。
+  const DEBT_KEYS = ["短期借入金", "コマーシャルペーパー", "1年内返済長期借入金", "長期借入金", "社債"];
+  const noDebtEver = DEBT_KEYS.every((k) => !ext[k] || !Object.keys(ext[k]).length);
+  const debtAt = (y) => {
+    if (noDebtEver) return 0;
+    let t = 0, got = false;
+    for (const k of DEBT_KEYS) { const v = num(ext[k]?.[y]); if (v !== null) { t += v; got = true; } }
+    return got ? t : null;
+  };
   const byYear = years.map((y) => {
     const e = at("EPS", y), p = at("株価収益率", y), b = at("BPS", y), dv = at("1株当たり配当", y);
     const pe = (p > 0 && e > 0) ? p * e : null;
@@ -166,6 +177,8 @@ export function profile(ctx) {
       payout: (dv !== null && e > 0) ? dv / e : null,
       pbr: div(pe, b),
       cash: at("現金及び現金同等物", y),
+      netCash: (() => { const c = at("現金及び現金同等物", y), d = debtAt(y);
+        return c === null || d === null ? null : c - d; })(),
     };
   });
 
@@ -438,7 +451,7 @@ export function keyFacts(pf) {
     ["ROE", pct(pf.roe)],
     ["自己資本比率", pct(pf.eqRatio)],
     ["ネットキャッシュ", oku(pf.netCash)],
-    ["時価総額", pf.mcap ? `${oku(pf.mcap)}（${pf.priceBasis}）` : "—（株価を入れると出ます）"],
+    ["時価総額", pf.mcap ? `${oku(pf.mcap)}（${pf.priceBasis}）` : "—（株価の入力で算出）"],
     ["PBR", x2(pf.pbr)],
     ["配当性向", pct(pf.payout)],
     ["流通株式比率（推定）", pf.float ? pct(pf.float.ratio) : "—"],

@@ -153,7 +153,7 @@ export function pageBiz(ctx) {
       `、営業${a.営業利益 < 0 ? "損失" : "利益"}${fmt(Math.abs(a.営業利益))}百万円` +
       (t.prior ? `（前年同期は営業${t.prior.営業利益 < 0 ? "損失" : "利益"}${fmt(Math.abs(t.prior.営業利益))}百万円）` : "") + "。");
   } else {
-    items.push(TODO("直近四半期の実績（決算短信を読み込むと入ります）"));
+    items.push(TODO("直近四半期の実績（決算短信の読み込みで入る）"));
   }
   if (pg) {
     for (const r of pg.rows) {
@@ -207,7 +207,7 @@ export function pageBiz(ctx) {
           : r.verdict ? `→ **${r.verdict}**。` : ""));
     }
   } else {
-    items.push(TODO("中計の目標（年度・売上高・営業利益・ROE）を画面に入れると、達成に要る伸びを出します"));
+    items.push(TODO("中計の目標（年度・売上高・営業利益・ROE）の入力で、達成に要る伸びを算出"));
   }
 
   const lead = leadBiz(pg, gap);
@@ -301,6 +301,8 @@ export function pageCapital(ctx) {
           ["自己資本比率", ...by.map((b) => pct(b.eqRatio))],
           ["配当性向", ...by.map((b) => pct(b.payout))],
           ["PBR（期末）", ...by.map((b) => b.pbr === null ? "—" : `${b.pbr.toFixed(2)}倍`)],
+          ["現預金（億円）", ...by.map((b) => b.cash === null ? "—" : (b.cash / 1e8).toFixed(1))],
+          ["ネットキャッシュ（億円）", ...by.map((b) => b.netCash === null ? "—" : (b.netCash / 1e8).toFixed(1))],
         ].filter((r) => r.slice(1).some((c) => c !== "—")),
       },
       ownRows.length ? {
@@ -318,7 +320,8 @@ export function pageCapital(ctx) {
       } : null,
     ].filter(Boolean),
     notes: [
-      "PBR（期末）＝有報の期末株価（PER×EPS）÷BPS。赤字の期はPERが出ないため空欄。",
+      "PBR（期末）＝有報の期末株価（PER×EPS）÷BPS。赤字の期はPERが出ないため空欄。" +
+      "ネットキャッシュ＝現預金−有利子負債。有利子負債は有報に2期分しか無いため、それ以前は空欄。",
       "流通株式比率は、自己株式・役員・10%以上の大株主・事業法人等・銀行保険の保有を除いた推定。" +
       "東証の算定とは一致しないので、会社の開示で確かめる。",
       "区分は株主名からの推定（信託口は投資家の預かりとして「信託・カストディ」）。",

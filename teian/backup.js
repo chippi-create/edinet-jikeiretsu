@@ -59,7 +59,7 @@ export function pageBackup(ctx) {
   const rd = latest(ext["研究開発費"]);
   const invest = [
     full ? `調達予定額 ${oku(full)}（基準株価×発行予定株数）を、次の成長投資に充てる。`
-      : TODO("調達予定額（株価を入れると計算します）"),
+      : TODO("調達予定額（株価の入力で算出）"),
     ...draftLines(ctx, "useOfFunds", "資金使途と金額・時期", 1).slice(0, 2),
     (capex !== null || rd !== null)
       ? `参考：直近期の実績は${capex !== null ? `設備投資${oku(capex)}` : ""}` +
@@ -72,7 +72,7 @@ export function pageBackup(ctx) {
   const cost = [
     g ? `販管費は${oku(g.amount)}（売上高の${pct(g.ratio)}）。1%削減で年${oku(g.amount * 0.01)}、` +
         `5%削減で年${oku(g.amount * 0.05)}の利益押し上げ。`
-      : TODO("販管費の規模（売上原価が取れていないため計算できません）"),
+      : TODO("販管費の規模（売上原価が未取得のため算出不可）"),
     ...draftLines(ctx, "costCut", "コスト削減・効率化の具体策", 2),
   ];
 
@@ -89,7 +89,7 @@ export function pageBackup(ctx) {
         "投資ごとに利益の見込みと回収の時期を置いて管理する。"
       : `中計（${ck.year}）の営業利益目標は、直近期の実績で既に上回っている。`);
   } else {
-    manage.push(TODO("投資に対して求める利益の水準（中計目標と株価を入れると計算します）"));
+    manage.push(TODO("投資に対して求める利益の水準（中計目標と株価の入力で算出）"));
   }
   manage.push(...draftLines(ctx, "investKpi", "投資の管理指標と見直しの仕組み", 2));
 
@@ -120,7 +120,7 @@ export function pageBackup(ctx) {
   if (worst !== null && worst > 0) {
     fallback.push(`行使が進まず最大${oku(worst)}不足した場合、次の順で埋める。`);
   } else {
-    fallback.push(TODO("不足額（株価を入れると、行使の進み方ごとに計算します）"));
+    fallback.push(TODO("不足額（株価の入力で、行使の進み方ごとに算出）"));
   }
   if (cashFree !== null) {
     fallback.push(`手元資金：月商の目安を置いたうえで使える${oku(cashFree)}。`);
@@ -163,11 +163,11 @@ export function pageBackup(ctx) {
       caption: "行使の進み方ごとの調達額",
       head: ["", "調達額", "予定との差"],
       rows,
-      note: "下限行使価額は画面で入れたときだけ計算します。",
+      note: "下限行使価額は入力時のみ算出。",
     }] : [],
     notes: [
       "販管費＝売上高−売上原価−営業利益（有価証券報告書の直近期）。",
-      "借入の余地は、有利子負債がEBITDAの5倍に収まる範囲で置いた目安。金利と借入条件で変わります。",
+      "借入の余地は、有利子負債がEBITDAの5倍に収まる範囲で置いた目安。金利と借入条件で変わる。",
     ],
   };
 }

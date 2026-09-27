@@ -707,6 +707,7 @@ $("material").addEventListener("change", () => readTanshin(false));
 const SLOT_LABEL = {
   bizDriver: "これまでの業績：何で伸びたか", chukeiFocus: "今後の方向性：中計で注力・改善すること",
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
+  costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
   growthView: "財務と投資計画の方向性", story: "資本政策の背景",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
@@ -721,10 +722,10 @@ const SLOT_GROUPS = [
   // サマリーの＜事業の状況＞①（何で伸びたか）は2〜3文なので、1文の2つと組む。
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
   ["bizDriver", "stockView", "growthView", "bizDriverShort"],
-  ["story", "useOfFunds", "whyMethod"],         // 各3点。14秒
+  ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
   ["segExisting", "segNew"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。
-  ["points", "chukeiFocus", "chukeiShort"],
+  ["points", "chukeiFocus", "chukeiShort", "investKpi"],
 ];
 
 $("ai").onclick = async () => {

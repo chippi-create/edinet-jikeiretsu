@@ -12,6 +12,7 @@ import {
 import { analyze } from "./shikin.js";
 import { buildGenjo } from "./genjo.js";
 import { jigyoCompact } from "./jigyo.js";
+import { pageBackup } from "./backup.js";
 
 // ---- 小道具 --------------------------------------------------------------
 
@@ -167,6 +168,8 @@ export function buildProposal(ctx) {
   pages.push(pageShareholders(ctx));
   pages.push(pageCompare(ctx));
   pages.push(pageTerms(ctx));
+  // 発行概要の直後に、資金が確保できなかった場合の備え（本人の指定で1枚）。
+  pages.push(pageBackup(ctx));
   return pages.flat().filter(Boolean);
 }
 

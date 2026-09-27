@@ -58,6 +58,13 @@ export function buildPptx(pages, PptxGenJS) {
       y += 0.54;
     }
 
+    // 4つの枠を2×2に並べるページ（バックアッププラン）。1枚に収めるための組み方。
+    if (p.layout === "grid4") {
+      grid4(s, p, y);
+      footer(s, p);
+      continue;
+    }
+
     const lines = flatten(p.blocks);
     const tables = p.tables || [];
     const twoCol = lines.length > 0 && tables.length > 0;
@@ -117,13 +124,43 @@ export function buildPptx(pages, PptxGenJS) {
         { x: 0.48, y: BOTTOM, w: 12.4, h: 0.24, fontSize: 8, color: SOFT, fontFace: FONT });
     }
 
-    const notes = (p.notes || []).map((x) => "※ " + x).join("\n");
-    if (notes) {
-      s.addText(notes, { x: 0.48, y: 6.72, w: 12.4, h: 0.42, fontSize: 8,
-        color: SOFT, fontFace: FONT, valign: "bottom" });
-    }
-    s.addText(String(p.no), { x: 6.17, y: 7.08, w: 1, h: 0.26, fontSize: 10,
-      color: SOFT, align: "center", fontFace: FONT });
+    footer(s, p);
   }
   return pptx;
+}
+
+/** 注記とページ番号。 */
+function footer(s, p) {
+  const notes = (p.notes || []).map((x) => "※ " + x).join("\n");
+  if (notes) {
+    s.addText(notes, { x: 0.48, y: 6.72, w: 12.4, h: 0.42, fontSize: 8,
+      color: SOFT, fontFace: FONT, valign: "bottom" });
+  }
+  s.addText(String(p.no), { x: 6.17, y: 7.08, w: 1, h: 0.26, fontSize: 10,
+    color: SOFT, align: "center", fontFace: FONT });
+}
+
+/**
+ * 4つの枠を2×2に並べる。枠ごとに見出しと箇条書き。
+ * 表は4つ目の枠の中に「項目 値」の行として入れる（表を別に置く場所が無いため）。
+ */
+function grid4(s, p, top) {
+  const W = 6.1, GAP = 0.2, BOTTOM = 6.62;
+  const H = (BOTTOM - top - GAP) / 2;
+  const blocks = (p.blocks || []).slice(0, 4).map((b) => ({ ...b, items: [...(b.items || [])] }));
+  const last = blocks[blocks.length - 1];
+  for (const t of p.tables || []) {
+    if (!last) break;
+    last.items.push(`${t.caption}：` + t.rows.map((r) => `${r[0]} ${r[1]}`).join(" ／ "));
+  }
+  blocks.forEach((b, i) => {
+    const x = 0.48 + (i % 2) * (W + GAP);
+    const y = top + Math.floor(i / 2) * (H + GAP);
+    s.addShape("rect", { x, y, w: W, h: H, line: { color: GRAY, width: 1 } });
+    s.addText([
+      { text: b.head || "", options: { bold: true, fontSize: 11, breakLine: true } },
+      ...b.items.map((t) => ({ text: t, options: { bullet: true, fontSize: 9.5, breakLine: true } })),
+    ], { x: x + 0.08, y: y + 0.05, w: W - 0.16, h: H - 0.1, color: FG, fontFace: FONT,
+         valign: "top", lineSpacingMultiple: 1.1 });
+  });
 }

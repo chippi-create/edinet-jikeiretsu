@@ -181,6 +181,10 @@ ITEMS = [
     ("電子記録債務", [], [r"^ElectronicallyRecordedObligationsOperatingCL$"]),
     ("仕入債務IFRS",
      [r"^TradePayables3CLIFRS$", r"^TradeAndOtherPayablesCLIFRS$"], []),
+
+    # 投資有価証券（貸借対照表）。政策保有株の規模を総資産と比べるのに使う。
+    # IFRSは「その他の金融資産」にまとめられて株式だけを取り出せないので、日本基準のみ。
+    ("投資有価証券", [], [r"^InvestmentSecurities$"]),
 ]
 
 # 提出会社（単体）だけから取る項目。
@@ -225,6 +229,45 @@ COVER_ITEMS = [
     ("発行済株式総数_期末",
      [r"^NumberOfIssuedSharesAsOfFiscalYearEndIssuedSharesTotalNumberOfSharesEtc$"]),
 ]
+
+# 【株式の保有状況】から取る項目（政策保有株）。
+#
+# 保有目的が純投資以外の株式（＝政策保有株）の銘柄数と貸借対照表計上額。
+# probeで5社を確かめてから書いた（菊池・ニッスイ・トーソー・石原ケミカル・
+# クリヤマHD・三越伊勢丹HD）。
+#
+# **持株会社は、本体ではなく子会社の欄に載る。** 開示は「提出会社」「最大保有会社」
+# 「次に大きい会社」の3つに分かれていて、三越伊勢丹HDは本体が非上場5.55億円だけで、
+# 上場株347.8億円は最大保有会社（三越伊勢丹）の欄にあった。本体だけ取ると大きく見落とすので、
+# 3つとも別々に溜める。合計は使う側で出す。
+#
+# 文脈は素の CurrentYearInstant / CurrentYearDuration（連結・単体の区別が無い）。
+# 個別銘柄の行（Row1Member…）は取らない。
+HOLDERS = [("", "ReportingCompany"), ("_最大保有会社", "LargestHoldingCompany"),
+           ("_第2位保有会社", "SecondLargestHoldingCompany")]
+_POL = "HeldForPurposesOtherThanPureInvestment"
+HOLDING_ITEMS = []
+for _sfx, _who in HOLDERS:
+    HOLDING_ITEMS += [
+        ("政策保有_上場_銘柄数" + _sfx,
+         rf"^NumberOfIssuesSharesOtherThanThoseNotListedInvestmentShares{_POL}{_who}$"),
+        ("政策保有_上場_計上額" + _sfx,
+         rf"^CarryingAmountSharesOtherThanThoseNotListedInvestmentShares{_POL}{_who}$"),
+        ("政策保有_非上場_計上額" + _sfx,
+         rf"^CarryingAmountSharesNotListedInvestmentShares{_POL}{_who}$"),
+        # 当期に売った額（上場）。売却を進めているかどうかが分かる。
+        ("政策保有_上場_売却額" + _sfx,
+         rf"^TotalSaleAmountForDecreasedSharesSharesOtherThanThoseNotListedInvestmentShares{_POL}{_who}$"),
+    ]
+# 純投資目的の上場株。菊池は上場株を全部こちらに分けていた（政策保有は非上場だけ）。
+# 要素名が政策保有と違う（BookValueEquitySecurities…）。
+HOLDING_ITEMS.append(
+    ("純投資_上場_計上額",
+     r"^BookValueEquitySecuritiesOtherThanThoseNotListedInvestmentEquitySecuritiesHeldForPureInvestmentReportingCompany$"))
+
+# 取得する項目の版。項目を足したらここを変える。
+# 記録の版が違う会社は取り直しの対象になる（記録を消さなくてよい）。
+ITEMS_VERSION = "2026-09-27 政策保有株"
 
 NULLS = ("", "-", "－", "―", "NA")
 
@@ -379,6 +422,19 @@ def normalize(text):
                 data[label] = {base: {"値": hit, "基準": "株式の総数等"}}
                 break
 
+    # 【株式の保有状況】。素の当期の文脈だけ見る（個別銘柄の Row…Member は除く）。
+    for label, pat in HOLDING_ITEMS:
+        for r in rows:
+            if r["コンテキストID"] not in ("CurrentYearInstant", "CurrentYearDuration"):
+                continue
+            if re.match(pat, r["要素ID"].split(":")[-1]) is None:
+                continue
+            v = (r["値"] or "").strip()
+            if v in NULLS:
+                continue
+            data[label] = {base: {"値": v, "基準": "株式の保有状況"}}
+            break
+
     return meta, data
 
 
@@ -420,6 +476,9 @@ def needs_update(sec, pair, state):
     """索引の書類構成が記録と違えば取り直す。新しい有報や訂正が出た会社だけが対象になる。"""
     got = state.get(sec)
     if not got:
+        return True
+    # 項目を足したあとは、前の版で取った会社も取り直す。
+    if got.get("項目版") != ITEMS_VERSION:
         return True
     if got.get("本体") != pair["本体"]["docID"]:
         return True
@@ -503,7 +562,10 @@ def main():
         log("対象がありません。")
         sys.exit(1)
 
-    pending = [sec for sec in sorted(picked) if needs_update(sec, picked[sec], state)]
+    # 一度も取れていない会社を先に、前の版で取った会社を後に回す。
+    # 項目を足すたびに0000番からやり直すと、後ろの番号の会社がいつまでも回ってこない。
+    pending = sorted((sec for sec in picked if needs_update(sec, picked[sec], state)),
+                     key=lambda sec: (sec in state, sec))
     log(f"■ 索引にある会社 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。取得するものはありません。")
@@ -615,6 +677,7 @@ def main():
             "本体": main["docID"],
             "訂正候補": [t["docID"] for t in pair["訂正"]],
             "適用した訂正": applied,
+            "項目版": ITEMS_VERSION,
             "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00", time.gmtime(time.time() + 9 * 3600)),
         }
         done += 1

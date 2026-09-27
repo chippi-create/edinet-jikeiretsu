@@ -203,7 +203,9 @@ function pageSummary(ctx) {
         head: "提案骨子", subs: [
           {
             head: "【資金調達手法】", items: [
-              D(ctx, "story", "資金使途（設備投資・研究開発・借入金返済など）を一文で") +
+              // 3点の下書き（story）をそのまま入れると「…がある。の実行に向けた」と文が壊れる。
+              // 短い版（useShort）だけを使う。
+              D(ctx, "useShort", "資金使途（設備投資・研究開発・借入金返済など）を短く") +
               "の実行に向けた機動的なエクイティファイナンスを提案。",
               "株価形成に応じた資金調達が可能な行使価額修正条項付新株予約権" +
               "（以下、MSワラント）を有力な選択肢として提案。",
@@ -289,7 +291,8 @@ function pageVoting(ctx) {
         foot: cur !== null
           ? ["合計", fmt(stable.shares), pct(cur, 2)] : null,
       } : null,
-      basis.voting ? dilutionTable(ctx, rows, label) : null,
+      // 株主を選んでいないと行が無く、見出しだけの表になる。出さない。
+      basis.voting && rows.length ? dilutionTable(ctx, rows, label) : null,
     ].filter(Boolean),
     notes: ["大量保有報告書、変更報告書をもとに作成"],
   };

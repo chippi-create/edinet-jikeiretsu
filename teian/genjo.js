@@ -314,7 +314,7 @@ export function pageCapital(ctx) {
         caption: "大株主上位5位",
         head: ["株主名", "区分", "比率"],
         rows: pf.holders.slice(0, 5).map((h) => [h.name,
-          looksLikeOwner(h) ? `${h.kind}（親会社・資産管理会社の可能性）` : h.kind, pct(h.ratio, 2)]),
+          looksLikeOwner(h) ? `${h.kind}（資産管理会社か）` : h.kind, pct(h.ratio, 2)]),
       } : null,
     ].filter(Boolean),
     notes: [

@@ -222,7 +222,8 @@ const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
 const fmt = (v) => (v === null || v === undefined || Number.isNaN(v))
   ? "—" : Math.round(v).toLocaleString("ja-JP");
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-const markTodo = (s) => esc(s).replace(/【[^】]+】/g, (m) => `<span class="todo">${m}</span>`);
+const markTodo = (s) => esc(s).replace(/【[^】]+】/g, (m) => `<span class="todo">${m}</span>`)
+  .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 
 const DATA = new URL(location.href).searchParams.get("data") || "";
 // 下書きの窓口。別のサイトに置く場合だけ ?api= で差し替える。
@@ -709,7 +710,7 @@ const SLOT_LABEL = {
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
-  growthView: "財務と投資計画の方向性", story: "資本政策の背景",
+  growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
   whyMethod: "その手法を選ぶ理由",
@@ -723,7 +724,7 @@ const SLOT_GROUPS = [
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
   ["bizDriver", "stockView", "growthView", "bizDriverShort"],
   ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
-  ["segExisting", "segNew"],                    // 長文。ここが重い
+  ["segExisting", "segNew", "useShort"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。
   ["points", "chukeiFocus", "chukeiShort", "investKpi"],
 ];

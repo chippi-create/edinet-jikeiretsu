@@ -15,19 +15,44 @@ function flatten(blocks, indent = 0, out = []) {
   for (const b of blocks || []) {
     if (b.head) out.push({ text: b.head, options: { bold: true, indentLevel: indent, breakLine: true } });
     for (const i of b.items || []) {
-      out.push({ text: i, options: { bullet: true, indentLevel: indent + 1, breakLine: true } });
+      // 太字の区切りごとに分ける。箇条書きと字下げは同じ行の部分すべてに付ける
+      // （先頭だけに付けたら、太字を含む行だけ記号と字下げが消えた）。改行は最後だけ。
+      const rs = runs(i);
+      rs.forEach((r, k) => {
+        out.push({ text: r.text, options: { ...r.options, bullet: true, indentLevel: indent + 1,
+          ...(k === rs.length - 1 ? { breakLine: true } : {}) } });
+      });
     }
     flatten(b.subs, indent + 1, out);
   }
   return out;
 }
 
-/** 表の行数から高さのあたりをつける。改行を含むセルは2行ぶん見る。 */
-function tableHeight(t) {
-  const rows = 1 + t.rows.length + (t.foot ? 1 : 0);
-  const wraps = t.rows.reduce((a, r) =>
-    a + Math.max(...r.map((c) => String(c).split("\n").length)) - 1, 0);
-  return 0.24 * (rows + wraps) + 0.3;
+/** 文字の幅のあたり。全角1、半角0.55。 */
+const textWidth = (s) => [...String(s)].reduce((a, c) => a + (c.charCodeAt(0) < 0x100 ? 0.55 : 1), 0);
+
+/**
+ * 表の高さのあたり。セルの文字が列の幅で折り返すぶんも数える。
+ * 以前は改行だけ数えていて、見出し「中計目標（2028年4月期）」や区分名が3行に折れた表が
+ * 次の表や注記に重なった（PowerPointで書き出して見つけた）。
+ * 9ptの全角1文字はおよそ0.125インチ。
+ */
+function tableHeight(t, width = 6.1) {
+  const n = Math.max(1, t.head.length);
+  const perLine = Math.max(3, Math.floor((width / n - 0.15) / 0.125));
+  const lines = (row) => Math.max(1, ...row.map((c) =>
+    String(c).split("\n").reduce((a, part) => a + Math.max(1, Math.ceil(textWidth(part) / perLine)), 0)));
+  const all = [t.head, ...t.rows, ...(t.foot ? [t.foot] : [])];
+  return all.reduce((a, r) => a + 0.19 * lines(r) + 0.08, 0) + 0.1;
+}
+
+/**
+ * 「**太字**」の記号を取り除く。PPTXでは太字にしない。
+ * 行の途中で太字に切り替えると、PowerPointでは箇条書きの記号と字下げが外れるか、
+ * 部分ごとに別の段落に割れた（書き出して確かめた）。骨格だけの資料なので記号を消すだけにする。
+ */
+function runs(text, base = {}) {
+  return [{ text: String(text).replace(/\*\*/g, ""), options: { ...base } }];
 }
 
 /**
@@ -52,7 +77,7 @@ export function buildPptx(pages, PptxGenJS) {
 
     let y = 0.88;
     if (p.lead) {
-      s.addText("➤ " + p.lead, { x: 0.48, y, w: 12.4, h: 0.38, fontSize: 12,
+      s.addText(runs("➤ " + p.lead), { x: 0.48, y, w: 12.4, h: 0.38, fontSize: 12,
         color: FG, fontFace: FONT, valign: "middle", margin: 6,
         line: { color: GRAY, width: 1 } });
       y += 0.54;
@@ -91,7 +116,7 @@ export function buildPptx(pages, PptxGenJS) {
     const dropped = [];
 
     for (const t of tables) {
-      const h = tableHeight(t) + (t.caption ? 0.28 : 0) + (t.note ? 0.26 : 0);
+      const h = tableHeight(t, colW) + (t.caption ? 0.28 : 0) + (t.note ? 0.26 : 0);
       while (ci < cols.length && cols[ci].y + h > BOTTOM) ci++;
       if (ci >= cols.length) { dropped.push(t.caption || "表"); continue; }
       const col = cols[ci];
@@ -111,7 +136,7 @@ export function buildPptx(pages, PptxGenJS) {
       s.addTable(rows, { x: col.x, y: col.y, w: colW, fontSize: 9, color: FG,
         fontFace: FONT, valign: "top", autoPage: false,
         border: { type: "solid", color: GRAY, pt: 0.5 } });
-      col.y += tableHeight(t);
+      col.y += tableHeight(t, colW);
       if (t.note) {
         s.addText("※ " + t.note, { x: col.x, y: col.y, w: colW, h: 0.24,
           fontSize: 8, color: SOFT, fontFace: FONT });
@@ -136,7 +161,8 @@ function footer(s, p) {
     s.addText(notes, { x: 0.48, y: 6.72, w: 12.4, h: 0.42, fontSize: 8,
       color: SOFT, fontFace: FONT, valign: "bottom" });
   }
-  s.addText(String(p.no), { x: 6.17, y: 7.08, w: 1, h: 0.26, fontSize: 10,
+  // 番号が【ページ番号】のままだと幅1インチでは2行に折れる。幅を取って中央に置く。
+  s.addText(String(p.no), { x: 5.67, y: 7.08, w: 2, h: 0.26, fontSize: 10,
     color: SOFT, align: "center", fontFace: FONT });
 }
 
@@ -159,7 +185,11 @@ function grid4(s, p, top) {
     s.addShape("rect", { x, y, w: W, h: H, line: { color: GRAY, width: 1 } });
     s.addText([
       { text: b.head || "", options: { bold: true, fontSize: 11, breakLine: true } },
-      ...b.items.map((t) => ({ text: t, options: { bullet: true, fontSize: 9.5, breakLine: true } })),
+      ...b.items.flatMap((t) => {
+        const rs = runs(t, { fontSize: 9.5 });
+        return rs.map((r, k) => ({ text: r.text, options: { ...r.options, bullet: true,
+          ...(k === rs.length - 1 ? { breakLine: true } : {}) } }));
+      }),
     ], { x: x + 0.08, y: y + 0.05, w: W - 0.16, h: H - 0.1, color: FG, fontFace: FONT,
          valign: "top", lineSpacingMultiple: 1.1 });
   });

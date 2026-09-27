@@ -57,10 +57,6 @@ export function sum(pick, keys) {
   return got ? total : null;
 }
 
-/** 比率。EDINETは会社によって 0.654 と 65.4 の両方で入っている。 */
-export const asRatio = (v) => (v === null || v === undefined ? null
-  : (Math.abs(v) > 1.5 ? v / 100 : v));
-
 const div = (a, b) => (a === null || b === null || b === 0) ? null : a / b;
 
 // ---- 運転資本とCCC -------------------------------------------------------
@@ -133,9 +129,7 @@ export function headroom({ cash, sales, within1y, monthsOfSales }) {
   const free = (cash === null || need === null)
     ? null : cash - need - (within1y || 0);
   return {
-    // 1年内返済が取れていないときは0として引くが、表示では「取れていない」と出す。
-    // 0と書くと、借入が無いように読めてしまう。
-    cash, monthly, need, within1y: within1y ?? null, free,
+    cash, monthly, need, within1y: within1y || 0, free,
     // 手元流動性。現預金が月商の何ヶ月ぶんか。
     months: div(cash, monthly),
   };
@@ -163,13 +157,9 @@ export function project({ cash, sales, opeCfRatio, growth, capexPerYear,
     c = c + ope - out;
     rows.push({ year: i, sales: s, ope, out, cash: c, short: c - (need || 0) });
   }
-  // いま既に下限を下回っている会社で「1年後に割る」と書くと、時期を誤って伝える。
-  // その場合は、割る年ではなく「いつ戻るか」を返す。
-  const belowNow = (cash || 0) - (need || 0) < 0;
-  const hit = belowNow ? null : rows.find((r) => r.short < 0);
-  const back = belowNow ? rows.find((r) => r.short >= 0) : null;
-  return { rows, belowNow, shortfallYear: hit ? hit.year : null,
-           recoverYear: back ? back.year : null };
+  // 必要な手元資金を割り込む最初の年。
+  const hit = rows.find((r) => r.short < 0);
+  return { rows, shortfallYear: hit ? hit.year : null };
 }
 
 // ---- 借入かエクイティか --------------------------------------------------
@@ -180,23 +170,18 @@ export function project({ cash, sales, opeCfRatio, growth, capexPerYear,
  * 断定はしない。「この数字だとこう見られやすい」という材料を出すだけ。
  * 実際の判断は、会社の意向・株価・金利環境で変わる。
  */
-export function financingFit({ debtTotal, cash, equity, assets, equityRatioReported,
+export function financingFit({ debtTotal, cash, equity, assets,
                                opProfit, depreciation, interest,
                                debtEbitdaLimit, interestCoverLimit }) {
   const ebitda = (opProfit === null) ? null : opProfit + (depreciation || 0);
   const netDebt = (debtTotal === null) ? null : debtTotal - (cash || 0);
   const points = [];
 
-  // 有報の自己資本比率があればそれを使う。純資産÷総資産は非支配株主持分や
-  // 新株予約権を含むので、サマリーに出す有報の値と食い違う（ニッスイ 40.0% と 41.4%）。
-  const equityRatio = asRatio(equityRatioReported) ?? div(equity, assets);
+  const equityRatio = div(equity, assets);
   const de = div(debtTotal, equity);
   const netDe = div(netDebt, equity);
   const debtEbitda = (ebitda !== null && ebitda > 0) ? div(debtTotal, ebitda) : null;
-  // 営業赤字のときの倍率はマイナスになり、数字として意味を持たない。
-  const cover = (interest && interest > 0 && opProfit !== null && opProfit > 0)
-    ? div(opProfit, interest) : null;
-  const opLoss = opProfit !== null && opProfit <= 0;
+  const cover = (interest && interest > 0) ? div(opProfit, interest) : null;
 
   if (ebitda !== null && ebitda <= 0) {
     points.push({ side: "equity", text:
@@ -210,10 +195,7 @@ export function financingFit({ debtTotal, cash, equity, assets, equityRatioRepor
           `有利子負債はEBITDAの${debtEbitda.toFixed(1)}倍。借入の余地がある。` });
   }
 
-  if (opLoss && interest && interest > 0) {
-    points.push({ side: "equity", text:
-      "営業赤字のため、利払いを営業利益で賄えていない。" });
-  } else if (cover !== null) {
+  if (cover !== null) {
     points.push(cover < interestCoverLimit
       ? { side: "equity", text:
           `営業利益は支払利息の${cover.toFixed(1)}倍。利払いの余裕が小さい。` }
@@ -221,32 +203,25 @@ export function financingFit({ debtTotal, cash, equity, assets, equityRatioRepor
           `営業利益は支払利息の${cover.toFixed(1)}倍。利払いの余裕がある。` });
   }
 
-  // 赤字（EBITDAがマイナス）の会社は、自己資本が厚くても無借金でも、
-  // 返済原資を示せないので借入は組みにくい。ここで「借入の余地は大きい」と書くと、
-  // 資金を燃やしている創薬（サンバイオ：自己資本比率85%・無借金）で結論が逆になる。
-  // 事実だけ書いて、どちらにも数えない。
-  const burning = ebitda !== null && ebitda <= 0;
-
   if (equityRatio !== null) {
-    const er = `自己資本比率は${(equityRatio * 100).toFixed(1)}%。`;
     points.push(equityRatio < 0.3
-      ? { side: "equity", text: er + "資本を厚くする必要性が高い。" }
-      : burning
-        ? { side: "none", text: er + "資本は厚いが、赤字のため借入の返済原資は示しにくい。" }
-        : { side: "debt", text: er + "財務の余力があり、希薄化を伴わない借入を選びやすい。" });
+      ? { side: "equity", text:
+          `自己資本比率は${(equityRatio * 100).toFixed(1)}%。` +
+          `資本を厚くする必要性が高い。` }
+      : { side: "debt", text:
+          `自己資本比率は${(equityRatio * 100).toFixed(1)}%。` +
+          `財務の余力があり、希薄化を伴わない借入を選びやすい。` });
   }
 
   if (netDe !== null && netDe < 0) {
-    points.push(burning
-      ? { side: "none", text: "現預金が有利子負債を上回っている（実質無借金）。" }
-      : { side: "debt", text:
-          "現預金が有利子負債を上回っている（実質無借金）。借入の余地は大きい。" });
+    points.push({ side: "debt", text:
+      "現預金が有利子負債を上回っている（実質無借金）。借入の余地は大きい。" });
   }
 
   const e = points.filter((p) => p.side === "equity").length;
   const d = points.filter((p) => p.side === "debt").length;
   return {
-    ebitda, netDebt, equityRatio, de, netDe, debtEbitda, cover, opLoss, points,
+    ebitda, netDebt, equityRatio, de, netDe, debtEbitda, cover, points,
     lean: e === d ? "どちらとも言えない" : e > d ? "エクイティ寄り" : "借入寄り",
   };
 }
@@ -256,14 +231,10 @@ export function financingFit({ debtTotal, cash, equity, assets, equityRatioRepor
 /**
  * 帯JSONの中身から、一式を組み立てる。
  * fin = d（主要な経営指標）, ext = x（追加で取った項目）
- *
- * 科目がどちらに入っているかは項目による（投資CFは x にしか無い）。
- * 決め打ちで片方だけ見ると、取れているのに無いことになるので、両方を見る。
  */
 export function analyze({ fin, ext, opts = {} }) {
   const o = { ...DEFAULTS, ...opts };
-  const src = (k) => fin[k] ?? ext[k];
-  const pick = (k) => latest(src(k));
+  const pick = (k) => latest(fin[k]) ?? latest(ext[k]);
 
   const sales = pick("売上高");
   const cogs = pick("売上原価");
@@ -271,81 +242,48 @@ export function analyze({ fin, ext, opts = {} }) {
   const wc = workingCapital(pick);
   const cy = ccc(wc, sales, cogs);
   const d = debt(pick);
-  // 売上の無い会社（創薬など）は、月商で手元資金を測れない。
-  // 代わりに「年にいくら減っていて、あと何年もつか」を出す。
-  const noSales = !(sales > 0);
-  const hr = headroom({ cash, sales: noSales ? null : sales, within1y: d.within1y,
+  const hr = headroom({ cash, sales, within1y: d.within1y,
                         monthsOfSales: o.monthsOfSales });
 
   // 売上の伸び。5年の実績から年平均で出す。入れてもらえればそれを使う。
-  const ss = series(src("売上高"), 5).filter((r) => r[1]);
+  const ss = series(fin["売上高"], 5).filter((r) => r[1]);
   const growth = o.growth !== null && o.growth !== undefined ? o.growth
     : (ss.length >= 2 && ss[0][1] > 0)
       ? Math.pow(ss[ss.length - 1][1] / ss[0][1], 1 / (ss.length - 1)) - 1
       : 0;
 
   // 営業CFの売上に対する比率。直近3年の平均。単年は振れるため。
-  // ただし直近期で黒字に転じた会社は、赤字の年を混ぜると「このままだと足りなくなる」
-  // と逆の結論になる（freee：直近+36.6億でも3年平均は−10%）。その場合は直近期を使う。
-  const ocs = series(src("営業CF"), 3);
-  const sls = series(src("売上高"), 3);
-  const oc = ocs.map((r) => r[1]).filter((v) => v !== null);
-  const sl = sls.map((r) => r[1]).filter((v) => v !== null);
-  const opeNow = oc.length ? oc[oc.length - 1] : null;
-  const turned = opeNow !== null && opeNow > 0 && oc.slice(0, -1).some((v) => v < 0);
-  const salesNow = sl.length ? sl[sl.length - 1] : null;
-  const opeCfBasis = turned && salesNow > 0 ? "直近期（黒字化したため）" : "直近3年平均";
-  const opeCfRatio = (turned && salesNow > 0) ? opeNow / salesNow
-    : (oc.length && sl.length && sl.some((v) => v > 0))
-      ? oc.reduce((a, b) => a + b, 0) / sl.reduce((a, b) => a + b, 0) : 0;
+  const oc = series(fin["営業CF"], 3).map((r) => r[1]).filter((v) => v !== null);
+  const sl = series(fin["売上高"], 3).map((r) => r[1]).filter((v) => v !== null);
+  const opeCfRatio = (oc.length && sl.length && sl.some((v) => v > 0))
+    ? oc.reduce((a, b) => a + b, 0) / sl.reduce((a, b) => a + b, 0) : 0;
 
-  // 投資額。入れてもらえればそれ、無ければ過去の投資CFの平均。
-  // 投資CFがプラス（資産売却などで入超）の年を「投資」として引くと逆になるので、
-  // 平均が入超なら0とする。
-  const ic = series(src("投資CF"), 3).map((r) => r[1]).filter((v) => v !== null);
-  const icAvg = ic.length ? ic.reduce((a, b) => a + b, 0) / ic.length : 0;
-  const capexPerYear = o.capexPerYear ?? Math.max(0, -icAvg);
+  // 投資額。入れてもらえればそれ、無ければ過去の投資CFの平均（絶対値）。
+  const ic = series(fin["投資CF"], 3).map((r) => r[1]).filter((v) => v !== null);
+  const capexPerYear = o.capexPerYear ?? (ic.length
+    ? Math.abs(ic.reduce((a, b) => a + b, 0) / ic.length) : 0);
 
-  const pj = noSales ? null : project({
+  const pj = project({
     cash: cash || 0, sales: sales || 0, opeCfRatio, growth, capexPerYear,
     repayPerYear: d.within1y || 0, need: hr.need, years: o.years,
   });
 
-  // 売上の無い会社の資金の持ち。営業CFは直近期、投資は上と同じ平均。
-  let runway = null;
-  if (noSales && cash !== null && opeNow !== null) {
-    const burn = -opeNow + capexPerYear;
-    runway = { burn, years: burn > 0 ? cash / burn : null };
-  }
-
   const fit = financingFit({
     debtTotal: d.total, cash, equity: pick("純資産"), assets: pick("総資産"),
-    equityRatioReported: pick("自己資本比率"),
     opProfit: pick("営業利益"), depreciation: pick("減価償却費"),
     interest: pick("支払利息"),
     debtEbitdaLimit: o.debtEbitdaLimit, interestCoverLimit: o.interestCoverLimit,
   });
 
   // 投資をやるのに足りない額。賄えるのは「使える現金＋年間の営業CF」まで。
-  // 使える現金がマイナス（目安を下回っている）のときは0とみなす。
-  // マイナスのまま引くと、投資0でも「◯億円足りない」と出てしまう。
   const opeCf = (sales || 0) * opeCfRatio;
-  const gap = (hr.free === null || !(capexPerYear > 0)) ? null
-    : Math.max(0, capexPerYear - (Math.max(0, hr.free) + opeCf));
+  const gap = (hr.free === null) ? null
+    : Math.max(0, capexPerYear - (hr.free + opeCf));
 
   return {
-    opts: o, sales, cogs, cash, growth, opeCfRatio, opeCfBasis, opeCf, capexPerYear,
+    opts: o, sales, cogs, cash, growth, opeCfRatio, opeCf, capexPerYear,
     wc, ccc: cy, debt: d, headroom: hr, projection: pj, fit, gap,
-    noSales, runway,
-    // 運転資本がマイナス＝売上代金が仕入の支払いより先に入る会社（小売など）。
-    // 手元が薄くても、資金が足りないことを意味しない。
-    // マイナス幅が月商の1/4を超えるときだけそう判定する。
-    // 不動産会社は販売用不動産が取れず、売上債権−仕入債務だけで −0.2億 と出る（GLM）。
-    // 小売の「商品」も取れていないことがある（ハローズ）。棚卸が抜けると運転資本は
-    // 小さく出るので、そのときは注記を付ける。
-    negativeWc: wc.wc !== null && hr.monthly !== null && wc.wc < -0.25 * hr.monthly,
-    missing: (noSales ? ["現金及び現金同等物", "営業CF"]
-      : ["売上高", "現金及び現金同等物", "営業CF"])
+    missing: ["売上高", "売上原価", "現金及び現金同等物", "営業CF"]
       .filter((k) => pick(k) === null),
   };
 }

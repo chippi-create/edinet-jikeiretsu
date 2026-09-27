@@ -358,8 +358,7 @@ function recalcStable() {
   const picked = [...$("shlist").querySelectorAll("input:checked")].map((c) => Number(c.dataset.i));
   const keep = n($("keep").value) / 100 || 0.5;
   const r = stableRatio(shList, picked, ctx.basis.voting);
-  // keep は提案書側でも使う。渡さないと、画面で33.4%にしても提案書は50%のままになる。
-  ctx.stable = { picked, label: $("slabel").value.trim() || "安定株主", keep, ...r };
+  ctx.stable = { picked, label: $("slabel").value.trim() || "安定株主", ...r };
   if (r.ratio) {
     const cap = maxDilutionFor(r.ratio, keep);
     $("stablenote").innerHTML =

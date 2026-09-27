@@ -66,24 +66,6 @@ export function latest(x) {
   return s.length ? s[0][1] : null;
 }
 
-/** 表の年の列。売上高だけで決めると、売上の無い会社（創薬など）で列が0本になる。 */
-function yearsOf(fin, n = 3) {
-  const ys = new Set();
-  for (const k of ["売上高", "営業利益", "経常利益", "純利益", "営業CF"]) {
-    for (const y of Object.keys(fin[k] || {})) ys.add(y);
-  }
-  return [...ys].sort().slice(-n);
-}
-
-/** 設備投資・研究開発費の一文。有報の値は実績なので「計画」とは書かない。
- *  「成長投資の局面」かどうかも数字からは言えないので、書かない。 */
-function investLine(capex, rd) {
-  const parts = [];
-  if (capex !== null) parts.push(`設備投資${fmt(mm(capex))}百万円`);
-  if (rd !== null) parts.push(`研究開発費${fmt(mm(rd))}百万円`);
-  return parts.length ? `直近期の実績は${parts.join("、")}。` : null;
-}
-
 /** 増減を日本語にする。「増収」「減益」など言い切る。評価語は使わない。 */
 function trend(cur, prev, up, down, flat = "横ばい") {
   if (cur === null || prev === null || prev === 0) return null;
@@ -133,8 +115,7 @@ export function stableRatio(list, picked, voting) {
     const s = list[i];
     if (s && s.shares) shares += s.shares;
   }
-  // 誰も選んでいないときに0%を返すと、「維持できる希薄化率 −100%」と出てしまう。
-  return { shares, ratio: voting && shares > 0 ? shares / voting : null };
+  return { shares, ratio: voting ? shares / voting : null };
 }
 
 // ---- 各ページの中身 ------------------------------------------------------
@@ -198,8 +179,12 @@ function pageSummary(ctx) {
     zaimu.push(`自己資本比率は${pct(asRatio(eq))}。` +
       (cash !== null ? `現預金は${oku(cash)}億円。` : ""));
   }
-  const inv = investLine(capex, rd);
-  if (inv) zaimu.push(inv);
+  if (capex !== null || rd !== null) {
+    const parts = [];
+    if (capex !== null) parts.push(`設備投資${fmt(mm(capex))}百万円`);
+    if (rd !== null) parts.push(`研究開発費${fmt(mm(rd))}百万円`);
+    zaimu.push(`${parts.join("、")}を計画しており、成長投資の局面にある。`);
+  }
 
   return {
     no: 2,
@@ -257,28 +242,18 @@ function pageVoting(ctx) {
   const { basis, stable, dilution, sec } = ctx;
   const list = shareholders(sec?.sh);
   const label = stable?.label || "安定株主";
-  const keep = stable?.keep ?? 0.5;
-  const kp = pct(keep, 0);
   const cur = stable?.ratio ?? null;
-  const cap = cur !== null ? maxDilutionFor(cur, keep) : null;
-  // 既に維持したい比率を下回っている（創業家が少数株主の会社）。
-  // この場合「維持できる希薄化率」はマイナスになり意味を持たないので、
-  // 発行後にどこまで下がるかを示す形に変える。
-  const below = cap !== null && cap <= 0;
+  const cap = cur !== null ? maxDilutionFor(cur, 0.5) : null;
   const shares = basis.voting ? potentialShares(basis.voting, dilution) : null;
-  // かっこ内の株数は、上限の希薄化率で出す。提案の希薄化率で出すと数字が噛み合わない。
-  const capShares = basis.voting && cap > 0 ? potentialShares(basis.voting, cap) : null;
-  const after = cur !== null ? dilutedRatio(cur, dilution) : null;
 
   const rows = (stable?.picked || []).map((i) => list[i]).filter(Boolean);
 
   return {
     no: 3,
     title: "議決権比率について",
-    lead: cur === null ? TODO("このページの結論を一文で")
-      : below
-        ? `${label}の議決権比率は${pct(cur, 1)}。希薄化率${pct(dilution)}の発行で${pct(after, 1)}に低下`
-        : `${label}の議決権比率${kp}維持を前提とした希薄化率は${pct(cap)}`,
+    lead: cur !== null
+      ? `${label}の議決権比率50%維持を前提とした希薄化率は${pct(cap)}`
+      : TODO("このページの結論を一文で"),
     blocks: [{
       head: `【${label}の議決権比率】`, items: [
         "エクイティファイナンスを行う場合、株式の発行に伴い" +
@@ -286,12 +261,10 @@ function pageVoting(ctx) {
         cur !== null
           ? `現状、${label}の議決権比率（近親者含む）は${pct(cur, 2)}程度と推定。`
           : TODO("現状の議決権比率"),
-        cur === null ? TODO("維持できる希薄化率")
-          : below
-            ? `現状で${kp}を下回っているため、${kp}維持を前提とした上限は置けない。` +
-              `希薄化率${pct(dilution)}で発行した場合、${pct(after, 2)}に低下すると試算。`
-            : `${label}の議決権比率が${kp}超を維持できる希薄化率は${pct(cap)}` +
-              (capShares ? `（${fmt(capShares)}株）` : "") + "と試算。",
+        cap !== null
+          ? `${label}の議決権比率が50%超を維持できる希薄化率は${pct(cap)}` +
+            (shares ? `（${fmt(shares)}株）` : "") + "と試算。"
+          : TODO("維持できる希薄化率"),
         basis.voting && shares
           ? `（計算式）議決権株式数${fmt(basis.voting)}株×${pct(dilution)}＝${fmt(shares)}株` +
             "（1,000株未満切り捨て）"
@@ -350,92 +323,51 @@ function pageCash(ctx) {
       ] }],
     }];
   }
+  const h = a.headroom, c = a.ccc, d = a.debt, f = a.fit;
   const y = (v) => v === null ? "—" : `${(v / 1e8).toFixed(1)}億円`;
-  const x = (v, n = 1) => v === null ? "—" : `${v.toFixed(n)}倍`;
-  if (a.noSales) return [pageRunway(ctx, a, y, x)];
-
-  const h = a.headroom, c = a.ccc, f = a.fit, p = a.projection;
   const dd = (v) => v === null ? "—" : `${Math.round(v)}日`;
-  const m = a.opts.monthsOfSales;
-  const mon = h.months === null ? "—" : h.months.toFixed(1);
-  const repay = h.within1y === null
-    ? "1年内の借入返済（取得できず0で計算）" : `1年内の借入返済に${y(h.within1y)}`;
+  const x = (v, n = 1) => v === null ? "—" : `${v.toFixed(n)}倍`;
 
   const items = [];
   const thin = h.free !== null && h.free < 0;
-  // 運転資本がマイナスの会社（小売など）は、売上代金が仕入の支払いより先に入る。
-  // 手元が月商の目安より薄くても、資金が足りないわけではない。
-  // ニッスイ向けの「余剰は無い」をここに当てると、正反対の結論になる（ハローズ）。
-  const negWc = a.negativeWc;
-  if (negWc) {
-    items.push(`現預金${y(h.cash)}は月商の${mon}ヶ月ぶん。運転資本は${y(a.wc.wc)}とマイナスで、` +
-      "売上代金が仕入の支払いより先に入る。月商×◯ヶ月の目安は当てはまりにくく、" +
-      "手元が薄いこと自体は資金の不足を意味しない。" +
-      (a.wc.inv === null
-        ? "（棚卸資産が取得できていないため、運転資本は実際より小さく出ている可能性がある）" : ""));
-  } else if (thin) {
-    // 「月商×1.5ヶ月」は中小型株の目安で、売上規模の大きい会社には当てはまらない。
-    // ニッスイ（売上9,300億・現預金242億）だと「自由に使える現金 −921億円」と出て、
-    // 数字としては正しくても、結論としては間違っている。
-    // 手元が薄い会社は、運転資本を仕入債務と借入で回しているだけなので、
-    // 余剰を負で言い切らず、状態の説明に変える。
-    items.push(`現預金${y(h.cash)}は月商の${mon}ヶ月ぶんで、` +
+  // 「月商×1.5ヶ月」は中小型株の目安で、売上規模の大きい会社には当てはまらない。
+  // ニッスイ（売上9,300億・現預金242億）だと「自由に使える現金 −921億円」と出て、
+  // 数字としては正しくても、結論としては間違っている。
+  // 手元が薄い会社は、運転資本を仕入債務と借入で回しているだけなので、
+  // 余剰を負で言い切らず、状態の説明に変える。
+  items.push(thin
+    ? `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶんで、` +
       `事業規模に対して薄い。運転資本${y(a.wc.wc)}は仕入債務と借入で回しており、` +
-      `**現預金に取り崩せる余剰は無い**。`);
-  } else {
-    items.push(`現預金${y(h.cash)}は月商の${mon}ヶ月ぶん。` +
-      `事業を回すのに${y(h.need)}、${repay}を置くと、` +
+      `**現預金に取り崩せる余剰は無い**。`
+    : `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶん。` +
+      `事業を回すのに${y(h.need)}、1年内の借入返済に${y(h.within1y)}を置くと、` +
       `**自由に使えるのは${y(h.free)}**。`);
-  }
   if (c.days !== null) {
-    items.push(c.days < 0
-      ? `売上代金は仕入の支払いより${dd(-c.days)}早く入る（売上債権${dd(c.dso)}＋` +
-        `棚卸${dd(c.dio)}−仕入債務${dd(c.dpo)}）。売上が伸びても運転資本の負担は増えにくい。`
-      : `仕入れてから現金として戻るまで${dd(c.days)}かかる（売上債権${dd(c.dso)}＋` +
-        `棚卸${dd(c.dio)}−仕入債務${dd(c.dpo)}）。売上が伸びると、` +
-        `その分だけ運転資本${y(a.wc.wc)}も増える。`);
+    items.push(
+      `仕入れてから現金として戻るまで${dd(c.days)}かかる（売上債権${dd(c.dso)}＋` +
+      `棚卸${dd(c.dio)}−仕入債務${dd(c.dpo)}）。売上が伸びると、` +
+      `その分だけ運転資本${y(a.wc.wc)}も増える。`);
   }
-  const pace = `いまのペース（年${(a.growth * 100).toFixed(1)}%増収、投資年${y(a.capexPerYear)}）`;
-  const last = p.rows[p.rows.length - 1];
-  // いま既に目安を下回っている会社に「◯年後に割る」とは書かない。時期を誤って伝える。
-  // 運転資本がマイナスの会社は、前のページで目安が当てはまらないと書いたので、比べない。
-  items.push(negWc
-    ? `${pace}なら、現金は${a.opts.years}年後に${y(last.cash)}の見込み。`
-    : p.belowNow
-    ? `現時点で月商×${m}ヶ月の目安を下回っている。${pace}なら、` +
-      (p.recoverYear ? `**${p.recoverYear}年後に目安を上回る**見込み。`
-                     : `**${a.opts.years}年後も目安を下回ったまま**の見込み。`)
-    : p.shortfallYear
-      ? `${pace}が続くと、**${p.shortfallYear}年後に手元資金の下限を割る**見込み。`
-      : `${pace}なら、${a.opts.years}年後も手元資金の下限を保てる見込み。`);
+  const p = a.projection;
+  items.push(p.shortfallYear
+    ? `いまのペース（年${(a.growth * 100).toFixed(1)}%増収、投資年${y(a.capexPerYear)}）` +
+      `が続くと、**${p.shortfallYear}年後に手元資金の下限を割る**見込み。`
+    : `いまのペースなら、${a.opts.years}年後も手元資金の下限を保てる見込み。`);
   if (a.gap > 0) {
     items.push(`年${y(a.capexPerYear)}の投資を続けるには、` +
       `自己資金（使える現金＋営業CF${y(a.opeCf)}）では**${y(a.gap)}足りない**。`);
   }
-  const split = c.days !== null ? 2 : 1;
-
-  const lead1 = negWc
-    ? `現預金${y(h.cash)}は月商の${mon}ヶ月ぶん。運転資本がマイナスで、手元を厚く持つ必要は小さい`
-    : thin
-      ? `現預金${y(h.cash)}は月商の${mon}ヶ月ぶん。取り崩せる余剰は無く、投資には調達が要る`
-      : `現預金${y(h.cash)}のうち、自由に使えるのは${y(h.free)}`;
-  const lead2 = negWc
-    ? `いまのペースなら、現金は${a.opts.years}年後に${y(last.cash)}の見込み`
-    : p.belowNow
-    ? (p.recoverYear
-      ? `現時点で手元資金の目安を下回っており、いまのペースなら${p.recoverYear}年後に上回る`
-      : `現時点で手元資金の目安を下回っており、${a.opts.years}年後も下回ったまま`)
-    : p.shortfallYear
-      ? `いまのペースが続くと、${p.shortfallYear}年後に手元資金の下限を割る`
-      : `いまのペースなら、${a.opts.years}年後も手元資金の下限を保てる`;
 
   // 1枚に表を4つ置くと紙面に入らない。現状と将来で2枚に分ける。
   return [
     {
       no: 5,
       title: "資金の余力",
-      lead: lead1,
-      blocks: [{ items: items.slice(0, split) }],
+      lead: thin
+        ? `現預金${y(h.cash)}は月商の${h.months === null ? "—" : h.months.toFixed(1)}ヶ月ぶん。` +
+          `取り崩せる余剰は無く、投資には調達が要る`
+        : `現預金${y(h.cash)}のうち、自由に使えるのは${y(h.free)}`,
+      blocks: [{ items: items.slice(0, 2) }],
       tables: [
         {
           caption: "手元資金の内訳",
@@ -443,10 +375,9 @@ function pageCash(ctx) {
           rows: [
             ["現預金", y(h.cash)],
             ["月商", y(h.monthly)],
-            [`− 事業に要る手元資金（月商×${m}ヶ月）`, y(h.need)],
-            ["− 1年内に返す借入", h.within1y === null ? "—（取得できず）" : y(h.within1y)],
-            [negWc ? "＝ 目安を置いた場合の残り（参考）"
-              : thin ? "＝ 不足（取り崩せる余剰は無い）" : "＝ 自由に使える現金", y(h.free)],
+            [`− 事業に要る手元資金（月商×${a.opts.monthsOfSales}ヶ月）`, y(h.need)],
+            ["− 1年内に返す借入", y(h.within1y)],
+            [thin ? "＝ 不足（取り崩せる余剰は無い）" : "＝ 自由に使える現金", y(h.free)],
           ],
           pick: 4,
         },
@@ -462,7 +393,7 @@ function pageCash(ctx) {
         },
       ].filter(Boolean),
       notes: [
-        `前提：事業に要る手元資金＝月商×${m}ヶ月。` +
+        `前提：事業に要る手元資金＝月商×${a.opts.monthsOfSales}ヶ月。` +
         "棚卸資産と仕入債務の日数は売上原価で割っています（売上高で割ると粗利のぶん短く出ます）。",
         "月商×◯ヶ月は中小型株の目安です。売上規模の大きい会社は手元を厚く持たず、" +
         "コミットメントライン等で回していることがあります。枠の有無は有価証券報告書から" +
@@ -472,9 +403,11 @@ function pageCash(ctx) {
     {
       no: 5,
       title: "調達の要否",
-      lead: lead2,
+      lead: p.shortfallYear
+        ? `いまのペースが続くと、${p.shortfallYear}年後に手元資金の下限を割る`
+        : `いまのペースなら、${a.opts.years}年後も手元資金の下限を保てる`,
       blocks: [
-        { items: items.slice(split) },
+        { items: items.slice(2) },
         { head: "借入とエクイティのどちらが向くか", items: f.points.map((q) => q.text) },
       ],
       tables: [
@@ -489,87 +422,28 @@ function pageCash(ctx) {
             ["下限との差", ...p.rows.map((r) => y(r.short))],
           ],
         },
-        debtTable(a, y, x),
+        {
+          caption: "借入余力の指標",
+          head: ["項目", "値"],
+          rows: [
+            ["有利子負債", y(d.total)],
+            ["ネット有利子負債（−現預金）", y(f.netDebt)],
+            ["EBITDA（営業利益＋減価償却費）", y(f.ebitda)],
+            ["有利子負債 ÷ EBITDA", x(f.debtEbitda)],
+            ["営業利益 ÷ 支払利息", x(f.cover)],
+            ["自己資本比率", f.equityRatio === null ? "—" : `${(f.equityRatio * 100).toFixed(1)}%`],
+            ["D/Eレシオ", x(f.de, 2)],
+          ],
+        },
       ],
       notes: [
         `前提：売上の伸び＝${(a.growth * 100).toFixed(1)}%、営業CF率＝` +
-        `${(a.opeCfRatio * 100).toFixed(1)}%（${a.opeCfBasis}）、` +
-        `投資＝年${y(a.capexPerYear)}（投資CFの直近3年平均）、` +
-        "返済＝1年内返済額が毎年続くと仮定。配当は引いていません。" +
-        "返済予定表は有報から取れないため粗い仮定です。",
+        `${(a.opeCfRatio * 100).toFixed(1)}%、投資＝年${y(a.capexPerYear)}、` +
+        "返済＝1年内返済額が毎年続くと仮定。返済予定表は有報から取れないため粗い仮定です。",
         `見立て：${f.lean}。株価と金利の状況、会社の意向で変わります。`,
       ],
     },
   ];
-}
-
-/** 借入余力の指標の表。 */
-function debtTable(a, y, x) {
-  const d = a.debt, f = a.fit;
-  return {
-    caption: "借入余力の指標",
-    head: ["項目", "値"],
-    rows: [
-      ["有利子負債", y(d.total)],
-      ["ネット有利子負債（−現預金）", y(f.netDebt)],
-      ["EBITDA（営業利益＋減価償却費）", y(f.ebitda)],
-      ["有利子負債 ÷ EBITDA", x(f.debtEbitda)],
-      // 営業赤字の倍率はマイナスになり、数字として読めない。
-      ["営業利益 ÷ 支払利息", f.opLoss ? "—（営業赤字）" : x(f.cover)],
-      ["自己資本比率", f.equityRatio === null ? "—" : `${(f.equityRatio * 100).toFixed(1)}%`],
-      ["D/Eレシオ", x(f.de, 2)],
-    ],
-  };
-}
-
-/**
- * 売上の無い会社（創薬など）の資金のページ。
- * 月商が無いので「手元資金の目安」は置けない。代わりに、年にいくら減っていて
- * いまの現預金であと何年もつかを出す。MSワラントの相手として多い型なので、
- * ページごと落とさない。
- */
-function pageRunway(ctx, a, y, x) {
-  const r = a.runway, f = a.fit;
-  const ope = latest(ctx.fin["営業CF"]) ?? latest(ctx.ext["営業CF"]);
-  const burning = r !== null && r.burn > 0;
-  const yrs = burning && r.years !== null ? r.years.toFixed(1) : null;
-  return {
-    no: 5,
-    title: "資金の余力と調達の要否",
-    lead: burning
-      ? `現預金${y(a.cash)}は、いまのペースで約${yrs}年分`
-      : `現預金${y(a.cash)}。直近期は現金が減っていない`,
-    blocks: [
-      { items: [
-        "売上高の計上が無く、手元資金を月商で測れない。",
-        `直近期の営業CFは${y(ope)}、投資は年${y(a.capexPerYear)}（投資CFの直近3年平均）。`,
-        burning
-          ? `年${y(r.burn)}のペースで現金が減っており、現預金${y(a.cash)}で**約${yrs}年分**。`
-          : "営業CFと投資を合わせると、直近期は現金が減っていない。",
-      ] },
-      { head: "借入とエクイティのどちらが向くか", items: f.points.map((q) => q.text) },
-    ],
-    tables: [
-      {
-        caption: "資金の持ち",
-        head: ["項目", "金額"],
-        rows: [
-          ["現預金", y(a.cash)],
-          ["営業CF（直近期）", y(ope)],
-          ["− 投資（年平均）", y(a.capexPerYear)],
-          ["＝ 年あたりの減少", burning ? y(r.burn) : "—（減っていない）"],
-          ["現預金 ÷ 年あたりの減少", yrs ? `約${yrs}年` : "—"],
-        ],
-        pick: 4,
-      },
-      debtTable(a, y, x),
-    ],
-    notes: [
-      "前提：直近期の営業CFと、投資CFの直近3年平均が続くと仮定。" +
-      "開発の段階が進むと費用は変わるため、開示されている開発計画で置き直すこと。",
-      `見立て：${f.lean}。株価と金利の状況、会社の意向で変わります。`,
-    ],
-  };
 }
 
 // --- p.6 株価の状況 --------------------------------------------------------
@@ -578,7 +452,7 @@ function pageStock(ctx) {
   const { fin, ext, market, basis } = ctx;
   // 決算短信から拾えた通期予想。有報には載らないので、ここでしか埋まらない。
   const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
-  const years = yearsOf(fin);
+  const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const row = (label, key, src) => [
     label, ...years.map((y) => {
       const v = num((src || fin)[key]?.[y]);
@@ -648,7 +522,7 @@ function pageStock(ctx) {
 function pageGrowth(ctx) {
   const { fin, ext, sec } = ctx;
   const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
-  const years = yearsOf(fin);
+  const years = Object.keys(fin["売上高"] || {}).sort().slice(-3);
   const line = (label, key, src, conv = mm) => [
     label, ...years.map((y) => {
       const v = num((src || fin)[key]?.[y]);
@@ -678,23 +552,22 @@ function pageGrowth(ctx) {
 
   const eq = latest(fin["自己資本比率"]);
   const cf = latest(fin["営業CF"]);
-  const cashS = series(ext["現金及び現金同等物"], 2);
-  const cash = cashS.length ? cashS[cashS.length - 1][1] : null;
-  const cashPrev = cashS.length > 1 ? cashS[0][1] : null;
+  const cash = latest(ext["現金及び現金同等物"]);
   const capex = latest(ext["設備投資"]);
   const rd = latest(ext["研究開発費"]);
 
   const items = [];
   if (cf !== null) {
     items.push(`営業CFは${fmt(mm(cf))}百万円。` +
-      // 「維持している」は推移を見ないと言えない（サンバイオは増資で28→148億）。
-      // 前期の値を並べるだけにする。
-      (cash !== null ? `期末の現預金は${oku(cash)}億円` +
-        (cashPrev !== null ? `（前期${oku(cashPrev)}億円）。` : "。") : ""));
+      (cash !== null ? `現預金は${oku(cash)}億円を維持している。` : ""));
   }
   if (eq !== null) items.push(`自己資本比率は${pct(asRatio(eq))}。`);
-  const inv = investLine(capex, rd);
-  if (inv) items.push(inv);
+  if (capex !== null || rd !== null) {
+    const p = [];
+    if (capex !== null) p.push(`設備投資${fmt(mm(capex))}百万円`);
+    if (rd !== null) p.push(`研究開発費${fmt(mm(rd))}百万円`);
+    items.push(`${p.join("、")}を計画しており、成長投資フェーズへ移行。`);
+  }
   items.push(TODO("中期経営計画の策定・公表を見据えた、エクイティファイナンスへの橋渡しを一文で"));
 
   if (fc) {
@@ -725,44 +598,34 @@ function pageGrowth(ctx) {
 // --- p.8 株主構成と希薄化余地 ----------------------------------------------
 
 function pageShareholders(ctx) {
-  const { sec, stable } = ctx;
+  const { sec, basis, stable, dilution } = ctx;
   const list = shareholders(sec?.sh).slice(0, 10);
   const own = ownership(sec?.own);
   const label = stable?.label || "安定株主";
-  const keep = stable?.keep ?? 0.5;
-  const kp = pct(keep, 0);
-  const cur = stable?.ratio ?? null;
-  // 「◯◯を中心とした株主構成」と言えるのは、選んだ株主が維持したい比率を超えているときだけ。
-  // 創業家が2割の会社（サンバイオ）に言うと事実と違う。
-  const major = cur !== null && cur > keep;
 
   const kojin = own.find((o) => /個人/.test(o.category) && !/外国/.test(o.category));
   const items = [];
-  if (cur !== null) {
-    items.push(`${label}における株式保有割合は${pct(cur, 1)}` +
-      (major ? `で${kp}を超えており、安定した株主構成となっている。` : "。"));
+  if (stable?.ratio != null) {
+    items.push(`${label}における株式保有割合は${pct(stable.ratio, 1)}` +
+      (stable.ratio > 0.5 ? "を超えており、安定した株主構成となっている。" : "。"));
   }
   if (kojin?.ratio != null) {
-    // 所有者別状況の「個人その他」には創業家個人も入っている。「除いた」とは書けない。
-    items.push(`所有者別株主状況では、個人投資家（${label}の個人保有を含む）が` +
-      `${pct(kojin.ratio, 1)}を占めている。`);
+    items.push(`${label}を除いた所有者別株主状況は、` +
+      `個人投資家が${pct(kojin.ratio, 1)}を占めている。`);
   }
-  items.push(cur === null ? TODO("希薄化率の目安")
-    : major
-      ? `${label}を中心とした株主構成を踏まえ、エクイティファイナンス実施時は` +
-        `議決権比率への配慮が重要。${label}の議決権${kp}超維持を前提とした場合、` +
-        `希薄化率は${pct(maxDilutionFor(cur, keep))}程度が一つの目安となる。`
-      : `${label}の保有は${kp}を下回っており、発行規模は議決権比率の維持よりも` +
-        `希薄化後の比率（希薄化率${pct(ctx.dilution)}で${pct(dilutedRatio(cur, ctx.dilution), 1)}）` +
-        "で示す。");
+  items.push(
+    `${label}を中心とした株主構成を踏まえ、エクイティファイナンス実施時は` +
+    `議決権比率への配慮が重要。` +
+    (stable?.ratio != null
+      ? `${label}の議決権50%超維持を前提とした場合、希薄化率は` +
+        `${pct(maxDilutionFor(stable.ratio, 0.5))}程度が一つの目安となる。`
+      : TODO("希薄化率の目安")));
 
   return {
     no: 8,
     title: "株主構成と希薄化余地",
-    lead: major
-      ? `${label}を中心とした株主構成を踏まえ、` +
-        `エクイティファイナンス実施時は議決権比率への配慮が重要`
-      : TODO("株主構成についての結論を一文で"),
+    lead: `${label}を中心とした株主構成を踏まえ、` +
+          `エクイティファイナンス実施時は議決権比率への配慮が重要`,
     tables: [
       list.length ? {
         caption: `大株主上位${list.length}位の状況`,
@@ -801,8 +664,8 @@ function pageCompare(ctx) {
     blocks: [{
       items: [
         ...Dlines(ctx, "whyMethod", "推奨の背景を1行", 2).slice(0, 2),
-        stable?.ratio != null && stable.ratio > (stable.keep ?? 0.5)
-          ? `${stable.label || "安定株主"}の議決権比率${pct(stable.keep ?? 0.5, 0)}超維持を前提とした` +
+        stable?.ratio != null
+          ? `${stable.label || "安定株主"}の議決権比率50%超維持を前提とした` +
             `発行規模設計を行いながら、株価上昇局面では調達額の増額余地を確保可能。`
           : TODO("議決権比率の維持と調達額の関係を1行"),
       ],

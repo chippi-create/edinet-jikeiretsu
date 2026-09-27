@@ -203,6 +203,37 @@ export function profile(ctx) {
     || (h.kind === "事業法人等" && !looksLikeOwner(h)));
   const policyHeldRatio = policyHeld.reduce((a, h) => a + (h.ratio || 0), 0);
 
+  // 会社が持っている政策保有株（【株式の保有状況】）。
+  // 持株会社は子会社（最大保有会社・第2位保有会社）の欄に載るので、3つを足す。
+  // 三越伊勢丹HDは本体が非上場5.55億円だけで、上場株347.8億円は最大保有会社の欄にあった。
+  const holdings = (() => {
+    const sfx = ["", "_最大保有会社", "_第2位保有会社"];
+    const sumOf = (k) => {
+      let t = 0, got = false;
+      for (const x of sfx) {
+        const v = latest(ext[`政策保有_${k}${x}`]);
+        if (v !== null) { t += v; got = true; }
+      }
+      return got ? t : null;
+    };
+    const listed = sumOf("上場_計上額");
+    const unlisted = sumOf("非上場_計上額");
+    const pure = latest(ext["純投資_上場_計上額"]);
+    // 項目がどれも無ければ「まだ取得していない」。0（持っていない）と区別する。
+    const fetched = Object.keys(ext).some((k) => k.startsWith("政策保有_") || k === "純投資_上場_計上額");
+    if (!fetched) return null;
+    const total = (listed || 0) + (unlisted || 0);
+    return {
+      listed, unlisted, total, count: sumOf("上場_銘柄数"), sold: sumOf("上場_売却額"), pure,
+      viaSubsidiary: ["_最大保有会社", "_第2位保有会社"].some((x) => latest(ext[`政策保有_上場_計上額${x}`]) !== null),
+      toEquity: div(total, equity),
+      // 売って現金にできる上場株。純投資目的の分も入れる。
+      // 菊池は政策保有が0.5億円だけだが、純投資目的の上場株を23.9億円（純資産の38%）持っていた。
+      sellable: (listed || 0) + (pure || 0),
+      pureToEquity: div(pure, equity),
+    };
+  })();
+
   const a = analyze({ fin, ext, opts: ctx.cashOpts || {} });
 
   return {
@@ -210,7 +241,7 @@ export function profile(ctx) {
     opMargin: div(op, sales), payout: (dps !== null && eps > 0) ? dps / eps : null,
     cash, debt: d.total, netCash, netCashToAssets: div(netCash, assets),
     price, priceBasis, mcap, pbr, netCashToMcap: div(netCash, mcap),
-    byYear, holders: sh, own, float, policyHeld, policyHeldRatio,
+    byYear, holders: sh, own, float, policyHeld, policyHeldRatio, holdings,
     // 筆頭は、信託口（投資家の預かり）を除いた実質の持ち主で見る。
     top: sh.find((h) => h.kind !== "信託・カストディ" && h.kind !== "持株会") || null,
     owners: sh.filter((h) => looksLikeOwner(h) || (h.kind === "個人" && h.ratio >= 0.05)),
@@ -309,7 +340,7 @@ export function diagnose(ctx, pf = profile(ctx)) {
   // 4. 政策保有されている（相手が当社株を持っている）→ 政策株式の売却の受け皿
   if (pf.policyHeldRatio >= 0.05) {
     out.push({
-      id: "crossheld", title: `政策保有株：銀行・保険・事業会社が${pct(pf.policyHeldRatio)}を保有（大株主上位）`,
+      id: "crossheld", title: `当社株の持ち合い：銀行・保険・事業会社が${pct(pf.policyHeldRatio)}を保有（大株主上位）`,
       score: pf.policyHeldRatio >= 0.15 ? 2 : 1,
       evidence: pf.policyHeld.slice(0, 5).map((h) => `${h.name}（${h.kind}）${pct(h.ratio, 2)}`),
       products: ["政策株式の売却（売出しで受け皿を作る）", "自社株買い（受け皿として）"],
@@ -317,7 +348,37 @@ export function diagnose(ctx, pf = profile(ctx)) {
     });
   }
 
-  // 5. 資金需要 → エクイティファイナンス（その中でMSワラント・公募増資）
+  // 5. 政策保有株を持っている（会社が他社の株を持っている）→ 売却して還元・投資へ
+  //    目安は純資産の20%。議決権行使助言会社がこれを超えると反対を推奨する水準。
+  const hd = pf.holdings;
+  const allToEquity = hd ? div(hd.total + (hd.pure || 0), pf.equity) : null;
+  if (hd && allToEquity !== null && allToEquity >= 0.1) {
+    const ev = [];
+    if (hd.total > 0) {
+      ev.push(`政策保有株 ${oku(hd.total)}（純資産の${pct(hd.toEquity)}）` +
+        (hd.count !== null ? `・上場${hd.count}銘柄` : "") +
+        (hd.viaSubsidiary ? "・子会社（最大保有会社など）の保有を含む" : ""));
+    }
+    if (hd.pure > 0) ev.push(`純投資目的の上場株 ${oku(hd.pure)}（純資産の${pct(hd.pureToEquity)}）`);
+    // 純資産20%の目安は政策保有の分だけに当てる（純投資は批判の対象になりにくい）。
+    let score = hd.toEquity >= 0.2 || allToEquity >= 0.3 ? 2 : 1;
+    if (hd.toEquity >= 0.2) ev.push("純資産の20%以上（議決権行使助言会社が反対を推奨する目安）");
+    if (pf.roe !== null && pf.roe > 0 && pf.roe < 0.08) { score++; ev.push(`ROE ${pct(pf.roe)}`); }
+    if (hd.sold) ev.push(`当期に${oku(hd.sold)}を売却済み（縮減を進めている）`);
+    out.push({
+      id: "crosshold", title: `保有株式：他社の株を純資産の${pct(allToEquity)}ぶん持っている`, score, evidence: ev,
+      // 赤字の会社は還元より先に資金繰り。菊池（赤字・純投資株23.9億）で「自社株買い」を先に出していた。
+      products: (() => {
+        const what = hd.total >= (hd.pure || 0) ? "政策保有株の売却" : "保有株の売却";
+        const give = `${what} → 売却資金で自社株買い・増配`;
+        const use = `${what} → 売却資金を事業・投資に充てる（エクイティの前に）`;
+        return pf.op !== null && pf.op > 0 ? [give, use] : [use];
+      })(),
+      note: "売却先の会社にとっては「政策株式の売却」の話にもなる。取引関係があるので、売る順番と相手の意向は会社と詰める。",
+    });
+  }
+
+  // 6. 資金需要 → エクイティファイナンス（その中でMSワラント・公募増資）
   {
     const ev = [];
     let score = 0;
@@ -344,6 +405,9 @@ export function diagnose(ctx, pf = profile(ctx)) {
     }
     if (a.fit?.ebitda !== null && a.fit?.ebitda <= 0) ev.push("EBITDAがマイナス");
 
+    if (score > 0 && hd && hd.sellable > 0) {
+      ev.push(`保有する上場株 ${oku(hd.sellable)}を売れば、一部を賄える`);
+    }
     if (score > 0) {
       const loss = pf.op !== null && pf.op < 0;
       const small = pf.mcap !== null && pf.mcap < 300e8;
@@ -378,5 +442,7 @@ export function keyFacts(pf) {
     ["PBR", x2(pf.pbr)],
     ["配当性向", pct(pf.payout)],
     ["流通株式比率（推定）", pf.float ? pct(pf.float.ratio) : "—"],
+    ["政策保有株", !pf.holdings ? "—（未取得）"
+      : `${oku(pf.holdings.total)}（純資産の${pct(pf.holdings.toEquity)}）`],
   ];
 }

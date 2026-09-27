@@ -248,6 +248,18 @@ export function pageCapital(ctx) {
   if (pf.pbr !== null) {
     items.push(`PBRは${pf.pbr.toFixed(2)}倍（${pf.priceBasis}）` + (pf.pbr < 1 ? "で1倍を下回る。" : "。"));
   }
+  if (pf.holdings) {
+    const h = pf.holdings;
+    items.push(h.total > 0
+      ? `政策保有株は${(h.total / 1e8).toFixed(1)}億円（純資産の${pct(h.toEquity)}` +
+        (h.count !== null ? `、上場${h.count}銘柄` : "") + "）" +
+        (h.toEquity >= 0.2 ? "で、純資産の20%を超える。" : "。") +
+        (h.sold ? `当期に${(h.sold / 1e8).toFixed(1)}億円を売却。` : "")
+      : "政策保有株は保有していない（有報の開示上）。");
+    if (h.pure > 0) {
+      items.push(`ほかに純投資目的の上場株を${(h.pure / 1e8).toFixed(1)}億円（純資産の${pct(h.pureToEquity)}）保有。`);
+    }
+  }
   if (pf.float) {
     // 市場区分が選ばれていなければ、どの基準を下回るかは書かない（菊池はスタンダード上場で、
     // 「プライムの基準を下回る」と書くと事実と違う印象になる）。

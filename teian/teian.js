@@ -11,6 +11,7 @@ import {
 } from "./sim.js";
 import { analyze } from "./shikin.js";
 import { buildGenjo } from "./genjo.js";
+import { jigyoBlock } from "./jigyo.js";
 
 // ---- 小道具 --------------------------------------------------------------
 
@@ -172,37 +173,8 @@ export function buildProposal(ctx) {
 // --- p.2 エグゼクティブサマリー -------------------------------------------
 
 function pageSummary(ctx) {
-  const { fin, ext, market, dilution } = ctx;
-  const op = series(fin["営業利益"], 3);
-  const eq = latest(fin["自己資本比率"]);
-  // 現預金が取れないときに営業CFで代用してはいけない。別物なので黙って落とす。
-  const cash = latest(ext["現金及び現金同等物"]) ?? latest(ext["現金及び預金"]);
-  const capex = latest(ext["設備投資"]);
-  const rd = latest(ext["研究開発費"]);
+  const { market, dilution } = ctx;
 
-  const opNow = op.length ? op[op.length - 1][1] : null;
-  const opPrev = op.length > 1 ? op[op.length - 2][1] : null;
-
-  const zaimu = [];
-  if (opNow !== null) {
-    // 赤字のときに「増益」と書くと意味が通らないので、言い方を変える。
-    const neg = opNow < 0 || (opPrev !== null && opPrev < 0);
-    // 赤字どうしの比較では、値が増える＝損失が減る。増減の向きが利益と逆になる。
-    const t = neg
-      ? trend(opNow, opPrev, "損失が縮小", "損失が拡大")
-      : trend(opNow, opPrev, "増益", "減益");
-    const kuro = opPrev !== null && opPrev < 0 && opNow >= 0 ? "黒字転換" : null;
-    zaimu.push(
-      `直近期の営業${opNow < 0 ? "損失" : "利益"}は${fmt(Math.abs(mm(opNow)))}百万円` +
-      (kuro ? "（前期比黒字転換）" : t ? `（前期比${t}）` : "") + "。" +
-      D(ctx, "mgmtSummary", "中期経営計画での総括を一文で"));
-  }
-  if (eq !== null) {
-    zaimu.push(`自己資本比率は${pct(asRatio(eq))}。` +
-      (cash !== null ? `現預金は${oku(cash)}億円。` : ""));
-  }
-  const inv = investLine(capex, rd);
-  if (inv) zaimu.push(inv);
 
   return {
     no: 2,
@@ -219,7 +191,8 @@ function pageSummary(ctx) {
                 : TODO("直近株価と時価総額"),
             ],
           },
-          { head: "【経営・財務状況】", items: zaimu.length ? zaimu : [TODO("経営・財務状況")] },
+          // ①これまでの業績 → ②今後と足元 → ③するべきこと、の三段で書く（本人の指定）。
+          jigyoBlock(ctx),
         ],
       },
       {

@@ -139,6 +139,7 @@
     <div><label for="dil">希薄化率（%）</label><input id="dil" class="short" inputmode="decimal"></div>
     <div><label for="floor">下限行使価額（基準株価の%）</label><input id="floor" class="short" inputmode="decimal" placeholder="空欄可"></div>
     <div><label for="years">権利行使期間（年）</label><input id="years" class="short" inputmode="decimal" placeholder="空欄可"></div>
+    <div><label for="exr">行使時の価格（基準株価の%）</label><input id="exr" class="short" inputmode="decimal" placeholder="空欄なら100"></div>
   </div>
   <p class="note">下限行使価額と権利行使期間は会社との個別交渉で決まるので、既定値は置いていません。入れた場合だけ計算します。</p>
   <div class="row" style="margin-top:10px">
@@ -266,7 +267,7 @@ function clearAll() {
   ctx = null; shList = []; pages = null; irDocs = [];
   for (const id of ["price", "asof", "dil", "floor", "years",
                     "capex", "growth", "material", "irurl", "pdfurl",
-                    "seg", "ckyear", "cksales", "ckop", "ckroe"]) $(id).value = "";
+                    "seg", "ckyear", "cksales", "ckop", "ckroe", "exr"]) $(id).value = "";
   $("shindan").innerHTML = "";
   $("shindan").classList.add("hide");
   $("months").value = "1.5";
@@ -473,6 +474,8 @@ $("go").onclick = () => {
   };
   ctx.terms = {
     floorRatio: n($("floor").value) ? n($("floor").value) / 100 : null,
+    // 調達考慮後の財務シミュレーションで、行使価額の修正（例：基準の92%）を見込むときに使う。
+    exerciseRatio: n($("exr").value) ? n($("exr").value) / 100 : null,
     years: n($("years").value) || null,
   };
   // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
@@ -710,7 +713,7 @@ const SLOT_LABEL = {
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
-  growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）",
+  growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）", storySlogan: "エクイティストーリー：目指す姿",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
   whyMethod: "その手法を選ぶ理由",
@@ -724,7 +727,7 @@ const SLOT_GROUPS = [
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
   ["bizDriver", "stockView", "growthView", "bizDriverShort"],
   ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
-  ["segExisting", "segNew", "useShort"],                    // 長文。ここが重い
+  ["segExisting", "segNew", "useShort", "storySlogan"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。
   ["points", "chukeiFocus", "chukeiShort", "investKpi"],
 ];

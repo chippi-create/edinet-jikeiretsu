@@ -13,6 +13,9 @@ import { analyze } from "./shikin.js";
 import { buildGenjo } from "./genjo.js";
 import { jigyoMid } from "./jigyo.js";
 import { pageBackup } from "./backup.js";
+import { pageKeiei } from "./keiei.js";
+import { pageSimEnd, pageSimMonthly, pageSimAfter } from "./sim2.js";
+import { pageRonten, pageStory } from "./ronten.js";
 
 // ---- 小道具 --------------------------------------------------------------
 
@@ -164,12 +167,19 @@ export function buildProposal(ctx) {
   pages.push(pageVoting(ctx));
   pages.push(...pageCash(ctx));
   pages.push(pageStock(ctx));
+  // 既存の提案書にあるページ（写真で受け取ったもの）。財務シミュレーションは赤字の会社だけ。
+  pages.push(pageKeiei(ctx));
+  pages.push(pageSimEnd(ctx));
+  pages.push(pageSimMonthly(ctx));
   pages.push(pageGrowth(ctx));
   pages.push(pageShareholders(ctx));
+  pages.push(pageRonten(ctx));
   pages.push(pageCompare(ctx));
   pages.push(pageTerms(ctx));
   // 発行概要の直後に、資金が確保できなかった場合の備え（本人の指定で1枚）。
+  pages.push(pageStory(ctx));
   pages.push(pageBackup(ctx));
+  pages.push(pageSimAfter(ctx));
   return pages.flat().filter(Boolean);
 }
 

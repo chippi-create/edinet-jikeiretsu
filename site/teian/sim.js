@@ -165,7 +165,9 @@ export function pickStep(price) {
  */
 export function maxDilutionFor(currentRatio, threshold = 0.5) {
   const d = currentRatio / threshold - 1;
-  return Math.floor(d * 1000) / 1000;   // 0.1%刻みで切り捨て
+  // 0.1%刻みで切り捨て。0.6÷0.5−1 は浮動小数点で 0.19999… になり、そのまま切ると
+  // 19.9% に落ちた。切り捨ての前に誤差ぶんだけ足す。
+  return Math.floor(d * 1000 + 1e-9) / 1000;
 }
 
 /** 希薄化後の議決権比率。 */

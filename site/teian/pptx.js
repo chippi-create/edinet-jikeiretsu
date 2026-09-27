@@ -83,6 +83,11 @@ export function buildPptx(pages, PptxGenJS) {
       y += 0.54;
     }
 
+    if (p.layout === "wideTable") { wideTable(s, p, y); footer(s, p); continue; }
+    if (p.layout === "stack") { stack(s, p, y); footer(s, p); continue; }
+    if (p.layout === "story") { story(s, p, y); footer(s, p); continue; }
+    if (p.layout === "plans") { plans(s, p, y); footer(s, p); continue; }
+
     // 左右2段（エグゼクティブサマリー）。1つ目のブロックを左、残りを右に置く。
     if (p.layout === "split") {
       const H = Math.min(6.65, notesTop(p) - 0.08) - y;
@@ -166,6 +171,90 @@ export function buildPptx(pages, PptxGenJS) {
     footer(s, p);
   }
   return pptx;
+}
+
+/** 表を置く。見出しの行（区切り）は太字にする。返り値は表の下端。 */
+function putTable(s, t, x, y, w, fontSize = 9) {
+  let top = y;
+  if (t.caption) {
+    s.addText(t.caption, { x, y: top, w, h: 0.24, fontSize: fontSize + 1, bold: true, color: FG, fontFace: FONT });
+    top += 0.26;
+  }
+  const isSection = (r) => r.slice(1).every((c) => c === "");
+  const rows = [
+    t.head.map((c) => ({ text: String(c), options: { bold: true, fill: "F2F2F2" } })),
+    ...t.rows.map((r, i) => r.map((c) => ({ text: String(c),
+      options: (t.section && isSection(r)) || t.pick === i ? { bold: true } : {} }))),
+    ...(t.foot ? [t.foot.map((c) => ({ text: String(c), options: { bold: true } }))] : []),
+  ];
+  const rowH = fontSize <= 8 ? 0.148 : 0.2;
+  s.addTable(rows, { x, y: top, w, fontSize, color: FG, fontFace: FONT, valign: "middle",
+    autoPage: false, rowH, margin: 0.02, border: { type: "solid", color: GRAY, pt: 0.5 } });
+  top += t.section ? rows.length * rowH + 0.05 : tableHeight(t, w) * (fontSize / 9);
+  if (t.note) {
+    s.addText("※ " + t.note, { x, y: top, w, h: 0.22, fontSize: 7.5, color: SOFT, fontFace: FONT });
+    top += 0.24;
+  }
+  return top;
+}
+
+/** 左に大きな表（主な経営指標）、右にほかの表と所見。 */
+function wideTable(s, p, top) {
+  const [main, ...rest] = p.tables || [];
+  if (main) putTable(s, main, 0.48, top, 7.3, 7.5);
+  let y = top;
+  for (const t of rest) y = putTable(s, t, 8.0, y, 4.85, 8) + 0.1;
+  const lines = flatten(p.blocks).map((r) => ({ text: r.text, options: { ...r.options, fontSize: 9.5 } }));
+  if (lines.length) {
+    s.addText(lines, { x: 8.0, y, w: 4.85, h: Math.max(0.5, notesTop(p) - 0.08 - y),
+      fontFace: FONT, color: FG, valign: "top", lineSpacingMultiple: 1.1 });
+  }
+}
+
+/** 上に文章（全幅）、下に表（全幅）。個別論点のページ。 */
+function stack(s, p, top) {
+  const lines = flatten(p.blocks).map((r) => ({ text: r.text, options: { ...r.options, fontSize: 10.5 } }));
+  const textH = lines.reduce((a, l) => a + 0.2 * Math.max(1, Math.ceil(textWidth(l.text) / 78)), 0.1);
+  s.addText(lines, { x: 0.48, y: top, w: 12.4, h: textH, fontFace: FONT, color: FG, valign: "top" });
+  let y = top + textH + 0.1;
+  for (const t of p.tables || []) y = putTable(s, t, 0.48, y, 12.4, 8.5) + 0.1;
+}
+
+/** エクイティストーリー：今の状況 → 今回ファイナンス → 左右2つの枠 → 目指す姿。 */
+function story(s, p, top) {
+  const [now, left, right, goal] = p.blocks || [];
+  const bl = (items, size) => (items || []).map((t) => ({ text: t, options: { bullet: true, breakLine: true, fontSize: size } }));
+  s.addText(bl(now?.items, 11), { x: 0.9, y: top, w: 11.6, h: 0.8, fontFace: FONT, color: FG, valign: "top" });
+  s.addText("今回ファイナンス", { x: 5.2, y: top + 0.85, w: 2.9, h: 0.4, fontSize: 12, bold: true,
+    align: "center", fontFace: FONT, color: FG, line: { color: FG, width: 1 } });
+  const bx = (b, x) => {
+    s.addShape("rect", { x, y: top + 1.45, w: 5.3, h: 3.1, line: { color: FG, width: 1 } });
+    s.addText(b?.head || "", { x: x + 1.2, y: top + 1.3, w: 2.9, h: 0.34, fontSize: 12, bold: true,
+      align: "center", fontFace: FONT, color: FG, fill: { color: "FFFFFF" }, line: { color: FG, width: 1 } });
+    s.addText(bl(b?.items, 10.5), { x: x + 0.15, y: top + 1.75, w: 5.0, h: 2.7,
+      fontFace: FONT, color: FG, valign: "top", lineSpacingMultiple: 1.1 });
+  };
+  bx(left, 0.9);
+  bx(right, 7.2);
+  s.addText("×", { x: 6.2, y: top + 2.6, w: 0.9, h: 0.6, fontSize: 28, bold: true, align: "center", fontFace: FONT, color: FG });
+  s.addText((goal?.items || []).join(" "), { x: 1.4, y: top + 4.75, w: 10.6, h: 0.45, fontSize: 13, bold: true,
+    align: "center", fontFace: FONT, color: FG, line: { color: GRAY, width: 1 } });
+}
+
+/** PLAN①②③。左に番号の箱、右に見出しと1〜2行。 */
+function plans(s, p, top) {
+  const list = (p.plans || []).slice(0, 4);
+  const H = Math.min(1.4, (notesTop(p) - 0.1 - top) / Math.max(1, list.length));
+  const circ = ["①", "②", "③", "④"];
+  list.forEach((pl, i) => {
+    const y = top + 0.15 + i * H;
+    s.addText(`PLAN${circ[i]}`, { x: 0.9, y, w: 1.9, h: 0.62, fontSize: 18, bold: true, align: "center",
+      valign: "middle", fontFace: FONT, color: FG, line: { color: FG, width: 1.5 } });
+    s.addText("➤ " + pl.title, { x: 3.0, y: y - 0.02, w: 9.6, h: 0.36, fontSize: 14, bold: true,
+      underline: true, fontFace: FONT, color: FG });
+    s.addText((pl.lines || []).map((l) => ({ text: "➡ " + l, options: { breakLine: true } })),
+      { x: 3.2, y: y + 0.36, w: 9.4, h: H - 0.45, fontSize: 10.5, fontFace: FONT, color: FG, valign: "top" });
+  });
 }
 
 /** 注記の行数。8ptで幅12.4インチに全角およそ110字。 */

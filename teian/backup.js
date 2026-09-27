@@ -147,9 +147,22 @@ export function pageBackup(ctx) {
 
   return {
     no: TODO("ページ番号"),
-    title: "バックアッププラン",
-    // PPTXでは4つの枠を2×2に並べる（1枚に収めるため）。画面は通常どおり。
-    layout: "grid4",
+    title: "エクイティファイナンスの骨子 ― バックアッププランの検討",
+    // PPTXでは PLAN①②③ の形に並べる（既存の提案書の形）。画面は4つの見出しのまま。
+    layout: "plans",
+    plans: [
+      { title: "ランニング費用の見直し（コスト削減・資金繰り改善）",
+        lines: [cost[0], ...cost.slice(1, 2)].filter((x) => x && !/^【/.test(x)).slice(0, 2) },
+      { title: "投資と成果の管理",
+        lines: manage.filter((x) => x && !/^【/.test(x)).slice(0, 2) },
+      { title: "投資資金を確保できなかった場合の備え",
+        lines: [
+          worst !== null && worst > 0 ? `行使が進まず最大${oku(worst)}不足した場合、` +
+            (cover >= worst ? `手元資金・保有株・借入の余地（計${oku(cover)}）で賄う。`
+                            : `手元資金・保有株・借入の余地（計${oku(cover)}）で埋め、残りは投資を後ろ倒し。`)
+            : "投資の優先順位と、後ろ倒しにできる投資を事前に決めておく。",
+        ] },
+    ],
     lead: worst !== null && worst > 0
       ? `成長投資と並行してコストを抑え、行使が進まず最大${oku(worst)}不足しても投資を続けられる備えを置く`
       : TODO("このページの結論を一文で"),

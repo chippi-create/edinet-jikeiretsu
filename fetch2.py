@@ -185,6 +185,21 @@ ITEMS = [
     # 投資有価証券（貸借対照表）。政策保有株の規模を総資産と比べるのに使う。
     # IFRSは「その他の金融資産」にまとめられて株式だけを取り出せないので、日本基準のみ。
     ("投資有価証券", [], [r"^InvestmentSecurities$"]),
+
+    # 貸借対照表の区分と純資産の内訳。「主な経営指標の状況」と財務シミュレーション
+    # （現預金と株主資本がいつマイナスになるか）に使う。当期・前期の2年分。
+    # probeで菊池・ニッスイ・Appier(IFRS)を見てから書いた。
+    # IFRSの非流動負債は要素名を確かめられなかったので取らない（負債合計−流動負債で出す）。
+    ("流動資産", [r"^CurrentAssetsIFRS$"], [r"^CurrentAssets$"]),
+    ("固定資産", [r"^NonCurrentAssetsIFRS$"], [r"^NoncurrentAssets$"]),
+    ("流動負債", [r"^TotalCurrentLiabilitiesIFRS$"], [r"^CurrentLiabilities$"]),
+    ("固定負債", [], [r"^NoncurrentLiabilities$"]),
+    ("負債合計", [r"^LiabilitiesIFRS$"], [r"^Liabilities$"]),
+    ("資本金", [r"^ShareCapitalIFRS$"], [r"^CapitalStock$"]),
+    ("資本剰余金", [r"^CapitalSurplusIFRS$"], [r"^CapitalSurplus$"]),
+    ("利益剰余金", [r"^RetainedEarningsIFRS$"], [r"^RetainedEarnings$"]),
+    # 日本基準の株主資本。IFRSには同じ区分が無いので親会社の所有者に帰属する持分で代える。
+    ("株主資本", [r"^EquityAttributableToOwnersOfParentIFRS$"], [r"^ShareholdersEquity$"]),
 ]
 
 # 提出会社（単体）だけから取る項目。
@@ -267,7 +282,7 @@ HOLDING_ITEMS.append(
 
 # 取得する項目の版。項目を足したらここを変える。
 # 記録の版が違う会社は取り直しの対象になる（記録を消さなくてよい）。
-ITEMS_VERSION = "2026-09-27 政策保有株"
+ITEMS_VERSION = "2026-09-27 政策保有株・BS区分"
 
 NULLS = ("", "-", "－", "―", "NA")
 

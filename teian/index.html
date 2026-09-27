@@ -186,16 +186,20 @@
   <p class="note" id="tanshinmsg"></p>
   <div id="drafts"></div>
 
-  <div class="bar">
-    <button id="go" class="big">MSワラントを提案する</button>
-    <button id="pptx" class="ghost hide">骨格のPPTXをダウンロード</button>
-    <button id="copyall" class="ghost hide">文章をまとめてコピー</button>
-    <span id="gomsg" class="ok"></span>
-  </div>
   <p class="note" id="warn"></p>
 </div>
 
 <div id="out"></div>
+
+<!-- ボタンの帯は入力欄の外に置く。中に置くと、入力欄が画面に入っているときしか
+     下に張り付かない。論点の表示が長くなって入力欄が画面の外に押し出され、
+     読み込んだ直後にボタンが見えなくなっていた。 -->
+<div id="bar" class="bar hide">
+  <button id="go" class="big">MSワラントを提案する</button>
+  <button id="pptx" class="ghost hide">骨格のPPTXをダウンロード</button>
+  <button id="copyall" class="ghost hide">文章をまとめてコピー</button>
+  <span id="gomsg" class="ok"></span>
+</div>
 
 </div>
 
@@ -268,6 +272,7 @@ function clearAll() {
                     "stablenote", "irhint", "tanshinmsg"]) $(id).textContent = "";
   $("basis").classList.add("hide");
   $("step2").classList.add("hide");
+  $("bar").classList.add("hide");
   $("pptx").classList.add("hide");
   $("copyall").classList.add("hide");
 }
@@ -375,6 +380,7 @@ async function load() {
   for (const cb of $("shlist").querySelectorAll("input")) cb.onchange = recalcStable;
 
   $("step2").classList.remove("hide");
+  $("bar").classList.remove("hide");
   $("loadmsg").textContent = "";
   recalcStable();
   renderShindan();

@@ -10,6 +10,7 @@ import {
   maxDilutionFor, dilutedRatio, checkBasis,
 } from "./sim.js";
 import { analyze } from "./shikin.js";
+import { buildGenjo } from "./genjo.js";
 
 // ---- 小道具 --------------------------------------------------------------
 
@@ -136,6 +137,8 @@ export function stableRatio(list, picked, voting) {
  */
 export function buildProposal(ctx) {
   const pages = [];
+  // 冒頭に「御社の現状」2枚。話の入口になるので、手法の話より前に置く。
+  pages.push(...buildGenjo(ctx));
   pages.push(pageSummary(ctx));
   pages.push(pageVoting(ctx));
   pages.push(...pageCash(ctx));

@@ -79,6 +79,16 @@
   .draft { border:1px solid var(--line); border-radius:4px; padding:8px 12px; margin:8px 0; }
   .draft b { font-size:13px; }
   .draft p { margin:4px 0 6px; white-space:pre-line; font-size:14px; }
+  .issue { border:1px solid var(--line); border-radius:6px; padding:10px 14px; margin:8px 0; }
+  .issue h4 { margin:0 0 4px; font-size:14px; }
+  .issue .sc { color:var(--muted); font-weight:normal; font-size:12px; margin-left:6px; }
+  .issue .pr { margin:4px 0 0; font-size:13px; }
+  .facts { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; margin:4px 0 8px; }
+  .facts span b { font-weight:600; }
+  select {
+    background:var(--field); color:var(--fg); border:1px solid var(--line2);
+    border-radius:4px; padding:7px 9px; font:inherit; font-size:14px;
+  }
   .bar {
     position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
     padding:10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
@@ -90,7 +100,7 @@
 
 <h1>提案書ドラフト</h1>
 <p class="sub">
-  有価証券報告書（EDINET）から、MSワラント提案の中身を組み立てます。体裁は持ちません。<br>
+  有価証券報告書（EDINET）から、会社の論点をざっくり並べ、MSワラント提案の中身を組み立てます。体裁は持ちません。<br>
   <span class="todo">【　】</span>は判断が要るところです。自動では埋めません。<br>
   出典：金融庁 EDINET。投資判断の助言ではありません。
 </p>
@@ -103,6 +113,7 @@
   <div id="loadmsg" class="ok"></div>
 </div>
 <div id="basis" class="card hide"></div>
+<div id="shindan" class="hide"></div>
 
 <div id="step2" class="hide">
   <h2>2. 安定株主を選ぶ</h2>
@@ -130,6 +141,16 @@
     <div><label for="yrs">何年先まで見るか</label><input id="yrs" class="short" value="5" inputmode="numeric"></div>
   </div>
   <p class="note">資金の余力を見るページの前提です。空欄なら実績から置きます。</p>
+  <div class="row" style="margin-top:10px">
+    <div><label for="seg">市場区分</label>
+      <select id="seg"><option value="">選ばない</option><option>プライム</option><option>スタンダード</option><option>グロース</option></select></div>
+    <div><label for="ckyear">中計の目標年度</label><input id="ckyear" class="short" placeholder="2028年3月期"></div>
+    <div><label for="cksales">中計 売上高（百万円）</label><input id="cksales" class="short" inputmode="numeric"></div>
+    <div><label for="ckop">中計 営業利益（百万円）</label><input id="ckop" class="short" inputmode="numeric"></div>
+    <div><label for="ckroe">中計 ROE（%）</label><input id="ckroe" class="short" inputmode="decimal"></div>
+  </div>
+  <p class="note">「御社の現状」ページに使います。市場区分は流通株式の基準と比べるため（データに無いので選んでください）。
+    中計の数字は資料を見て入れてください（数字はAIに読ませません）。</p>
 
   <h2>4. AIに下書きさせる（任意）</h2>
   <p class="note">
@@ -181,7 +202,8 @@
 <script type="module">
 import { buildProposal, shareholders, stableRatio, pageText, countTodo } from "./teian.js";
 import { checkBasis, maxDilutionFor } from "./sim.js";
-import { parseTanshin, tanshinLine } from "./tanshin.js";
+import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
+import { profile, diagnose, keyFacts } from "./shindan.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -230,7 +252,10 @@ const memo = {
 function clearAll() {
   ctx = null; shList = []; pages = null; irDocs = [];
   for (const id of ["price", "asof", "dil", "floor", "years",
-                    "capex", "growth", "material", "irurl", "pdfurl"]) $(id).value = "";
+                    "capex", "growth", "material", "irurl", "pdfurl",
+                    "seg", "ckyear", "cksales", "ckop", "ckroe"]) $(id).value = "";
+  $("shindan").innerHTML = "";
+  $("shindan").classList.add("hide");
   $("months").value = "1.5";
   $("yrs").value = "5";
   delete $("dil").dataset.touched;
@@ -351,7 +376,46 @@ async function load() {
   $("step2").classList.remove("hide");
   $("loadmsg").textContent = "";
   recalcStable();
+  renderShindan();
 }
+
+/** 画面の入力を ctx に写す。診断と提案書の両方がこれを読む。 */
+function readInputs() {
+  ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {},
+                 segment: $("seg").value };
+  ctx.chukei = {
+    year: $("ckyear").value.trim(),
+    sales: n($("cksales").value) || null,
+    op: $("ckop").value.trim() === "" ? null : n($("ckop").value),
+    roe: n($("ckroe").value) ? n($("ckroe").value) / 100 : null,
+  };
+}
+
+/**
+ * この会社で何が論点になりそうかを、数字の条件でざっくり並べる。
+ * MSワラントに入る前の入口。判断ではなく材料なので、根拠の数字を全部出す。
+ */
+function renderShindan() {
+  if (!ctx) return;
+  readInputs();
+  const pf = profile(ctx);
+  const issues = diagnose(ctx, pf);
+  const big = pf.mcap && pf.mcap > 1000e8;
+  $("shindan").classList.remove("hide");
+  $("shindan").innerHTML = `<h2>この会社の論点（ざっくり）</h2>` +
+    `<div class="facts">${keyFacts(pf).map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>` +
+    (big ? `<p class="note"><b>時価総額が1,000億円を超えています</b>（対象の規模の外）。</p>` : "") +
+    (issues.length ? issues.map((i) => `<div class="issue">
+        <h4>${esc(i.title)}<span class="sc">${"●".repeat(i.score)}${"○".repeat(Math.max(0, 3 - i.score))}</span></h4>
+        <ul>${i.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
+        <p class="pr">候補：${i.products.map(esc).join(" ／ ")}</p>
+        <p class="note">${esc(i.note)}</p></div>`).join("")
+      : `<p class="note">数字の条件に当たる論点はありませんでした（資本効率・流通株式・大株主・政策保有・資金需要を見ています）。</p>`) +
+    `<p class="note">有報の数字に条件を当てて並べたものです。●は当たった条件の数で、強さの目安です。` +
+    `会社が持っている政策保有株（持ち合い）の額はまだ取得していないので、ここには出ません。` +
+    `株価・市場区分を入れると、時価総額・PBR・流通株式の判定が変わります。</p>`;
+}
+for (const id of ["price", "seg"]) $(id).addEventListener("change", renderShindan);
 
 function recalcStable() {
   if (!ctx) return;
@@ -381,7 +445,8 @@ $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); })
 
 $("go").onclick = () => {
   if (!ctx) return;
-  ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {} };
+  readInputs();
+  renderShindan();
   ctx.dilution = (n($("dil").value) || 13.1) / 100;
   ctx.cashOpts = {
     monthsOfSales: n($("months").value) || 1.5,
@@ -597,6 +662,8 @@ ${j.text}`);
 function readTanshin(quiet) {
   if (!ctx) return;
   ctx.tanshin = parseTanshin($("material").value) || null;
+  // 1Qと2Qの短信を両方入れてあれば、四半期ごとの単独の数字が出せる。
+  ctx.tanshinAll = parseTanshinAll($("material").value);
   const el = $("tanshinmsg");
   el.innerHTML = ctx.tanshin
     ? `決算短信を読み取りました：${esc(tanshinLine(ctx.tanshin))}`

@@ -78,7 +78,7 @@ export function parseTanshin(text) {
 
   const out = {
     company: null, code: null, period: null, quarter: null,
-    announced: null, forecast: null, actual: null,
+    announced: null, forecast: null, halfForecast: null, actual: null, prior: null,
     equityRatio: null, dividendForecast: null, source: "決算短信",
   };
 
@@ -110,6 +110,13 @@ export function parseTanshin(text) {
       }
       break;
     }
+    // 第2四半期（累計）の予想。上期の進捗を見るのに使う。出していない会社も多い。
+    for (let i = fi; i < Math.min(lines.length, fi + 20); i++) {
+      if (!/^\s*第\s*2\s*四\s*半\s*期\s*\(累計\)/.test(norm(lines[i]))) continue;
+      const f = pickFour(lines[i]);
+      if (f) out.halfForecast = { 売上高: f[0], 営業利益: f[1], 経常利益: f[2], 純利益: f[3] };
+      break;
+    }
   }
 
   // 直近四半期の実績。「◯年◯月期第◯四半期」で始まり、数字が4つ以上ある行。
@@ -122,6 +129,14 @@ export function parseTanshin(text) {
       if (f) {
         out.actual = { 期: l.split(" ")[0], 売上高: f[0], 営業利益: f[1],
                        経常利益: f[2], 純利益: f[3] };
+        // 次の行が前年同期。順調かどうかは、前年の同じ時点と比べないと言えない
+        // （季節性がある会社は、1Qで25%に届かないのが普通のことがある）。
+        const nx = lines[i + 1] ? norm(lines[i + 1]) : "";
+        const pf = /^\s*\d{4}年\s*\d{1,2}月期/.test(nx) ? pickFour(lines[i + 1]) : null;
+        if (pf) {
+          out.prior = { 期: nx.trim().split(" ")[0], 売上高: pf[0], 営業利益: pf[1],
+                        経常利益: pf[2], 純利益: pf[3] };
+        }
       }
       break;
     }
@@ -132,6 +147,26 @@ export function parseTanshin(text) {
   if (eq) out.equityRatio = Number(eq[1]);
 
   return (out.forecast || out.actual) ? out : null;
+}
+
+/**
+ * 貼られた資料に短信が何本も入っているとき、1本ずつ読む。
+ * 読み込むときに「=== 資料名 ===」で区切っているので、そこで割る。
+ * 1Qと2Qの短信を両方入れれば、2Q単独（2Q累計−1Q累計）が出せる。
+ */
+export function parseTanshinAll(text) {
+  if (!text) return [];
+  const parts = String(text).split(/^=== .* ===$/m).filter((t) => t.trim());
+  return parts.map(parseTanshin).filter(Boolean);
+}
+
+/** 四半期の番号。通期は4、中間期は2。 */
+export function quarterNo(q) {
+  if (!q) return null;
+  if (/中間/.test(q)) return 2;
+  if (/通期/.test(q)) return 4;
+  const m = /第\s*(\d)/.exec(q);
+  return m ? Number(m[1]) : null;
 }
 
 /** 提案書に出せる形の1行にする。 */

@@ -92,7 +92,7 @@ export function pageRonten(ctx) {
       table = {
         caption: `希薄化率と${label}の議決権比率`,
         head: ["株主名", "保有株数", "現状", ...scen.map((d) => pct(d, cap === d ? 1 : 0) + (cap === d ? "（上限）" : ""))],
-        rows: rows.map((r) => [r.name, fmt(r.shares), pct(r.shares / voting, 2),
+        rows: rows.map((r) => [r.label, fmt(r.shares), pct(r.shares / voting, 2),
           ...scen.map((d) => pct(dilutedRatio(r.shares / voting, d), 2))]),
         foot: ["合計", fmt(st.shares), pct(st.ratio, 2), ...scen.map((d) => pct(dilutedRatio(st.ratio, d), 1))],
         note: "希薄化率＝発行予定株数÷議決権株式数。大量保有報告書・変更報告書で共同保有を確認すること。",

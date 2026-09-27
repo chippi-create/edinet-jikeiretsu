@@ -217,6 +217,7 @@ import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
+import { buildMemo } from "./memo.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -525,7 +526,18 @@ function render() {
   // 提案書のサマリーは各段1行。詳しい三段は、話す前に読む下書きとしてここに出す。
   const jb = jigyoBlock(ctx);
   const jtext = [jb.head, ...jb.subs.flatMap((b) => [b.head, ...b.items.map((i) => "・" + i)])].join("\n");
-  $("out").innerHTML = `<h2>＜事業の状況＞の下書き（詳細）</h2>
+  // 考え方のメモ。提案書には入れない（PPTXにも出さない）。
+  const memo = buildMemo(ctx);
+  const flat = (bs, d = 0) => bs.flatMap((b) => [
+    ...(b.head ? ["  ".repeat(d) + b.head] : []),
+    ...(b.items || []).map((i) => "  ".repeat(d + 1) + "・" + i),
+    ...flat(b.subs || [], d + 1)]);
+  const mtext = flat(memo).join("\n");
+  $("out").innerHTML = `<h2>考え方のメモ（提案書には入れない）</h2>
+    <div class="page">${blocksHTML(memo)}
+      <div class="tools" style="margin-top:10px"><button class="ghost" id="mcopy">このメモをコピー</button>
+      <span class="ok" id="mmsg"></span></div></div>` +
+    `<h2>＜事業の状況＞の下書き（詳細）</h2>
     <div class="page">${blocksHTML(jb.subs)}
       <p class="note">提案書のエグゼクティブサマリーには、これを各段1行に縮めたものが入ります。</p>
       <div class="tools" style="margin-top:10px"><button class="ghost" id="jcopy">この下書きをコピー</button>
@@ -543,6 +555,7 @@ function render() {
       </div>
     </div>`).join("");
   $("jcopy").onclick = () => copy(jtext, $("jmsg"));
+  $("mcopy").onclick = () => copy(mtext, $("mmsg"));
   for (const b of $("out").querySelectorAll("[data-t]")) {
     b.onclick = () => copy(pageText(pages[Number(b.dataset.t)]), $("m" + b.dataset.t));
   }
@@ -713,7 +726,7 @@ const SLOT_LABEL = {
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
-  growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）", storySlogan: "エクイティストーリー：目指す姿",
+  growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）", storySlogan: "エクイティストーリー：目指す姿", growthArea: "主な経営指標：成長性のある領域",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
   whyMethod: "その手法を選ぶ理由",
@@ -725,7 +738,7 @@ const SLOT_LABEL = {
 const SLOT_GROUPS = [
   // サマリーの＜事業の状況＞①（何で伸びたか）は2〜3文なので、1文の2つと組む。
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
-  ["bizDriver", "stockView", "growthView", "bizDriverShort"],
+  ["bizDriver", "stockView", "growthView", "bizDriverShort", "growthArea"],
   ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
   ["segExisting", "segNew", "useShort", "storySlogan"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。

@@ -5,7 +5,7 @@
 // それ以前の年は空欄になる（仕様）。
 
 import { profile } from "./shindan.js";
-import { asRatio } from "./shikin.js";
+import { asRatio, segUnit } from "./shikin.js";
 
 const TODO = (w) => `【${w}】`;
 const num = (v) => {
@@ -101,31 +101,25 @@ export function pageKeiei(ctx) {
   ];
 
   // 右側：売上高の内訳（セグメント）と有価証券の保有状況
-  const seg = (sec.seg || []).map((s) => [String(s[0] || "").trim(), num(s[1])])
+  const seg0 = (sec.seg || []).map((s) => [String(s[0] || "").trim(), num(s[1])])
     .filter((s) => s[0] && s[1] !== null);
+  // セグメントの単位（千円・百万円・円）を連結売上高との比で判定して円に直す。
+  const unit = segUnit(seg0.map((x) => x[1]), get("売上高", years[years.length - 1]));
+  const seg = seg0.map(([n, v]) => [n, v * unit]);
   const pf = profile(ctx);
   const h = pf.holdings;
 
-  // 所見は数字から言える事実だけ。評価や方向性は【　】で空ける。
-  const net = years.map((y) => get("純利益", y)).filter((v) => v !== null);
-  const lossYears = net.filter((v) => v < 0).length;
-  const items = [
-    net.length
-      ? (lossYears === 0 ? `直近${net.length}期は最終黒字を継続。`
-        : lossYears === net.length ? `直近${net.length}期は最終赤字が継続。`
-        : `直近${net.length}期のうち${lossYears}期が最終赤字。`) +
-        (pf.cash !== null ? `現預金は${(pf.cash / 1e8).toFixed(1)}億円` : "") +
-        (h && (h.sellable || h.total) ? `、保有する有価証券（上場）は${((h.sellable || 0) / 1e8).toFixed(1)}億円。` : "。")
-      : null,
-    pf.eqRatio !== null ? `自己資本比率は${pct(pf.eqRatio)}。` : null,
-    TODO("中期経営計画の進捗と、今期以降の見通しを1〜2行"),
-    TODO("今後の投資と財務基盤の課題を1行"),
-  ].filter(Boolean);
+  // 所見は、本人の指定したストーリーで組む：
+  //   事業がどうか → 成長性があるのはどこか → 成長を速めるには資金が要る
+  //   → 借入だと自己資本比率が下がる（試算）→ エクイティなら成長資金の確保と財務基盤の拡充を両立
+  // 数字は機械で出し、「成長性があるのはどこか」だけ下書き（growthArea）を使う。
+  const story = keieiStory(ctx, { years, get, seg, pf });
+  const items = story.items;
 
   return {
     no: TODO("ページ番号"),
     title: "主な経営指標の状況",
-    lead: TODO("このページの結論を一文で"),
+    lead: story.lead,
     layout: "wideTable",
     tables: [
       { caption: "", head, rows, section: true },
@@ -151,4 +145,78 @@ export function pageKeiei(ctx) {
       "株価は期末株価（PER×EPS）。売上高の内訳は直近期のみ。",
     ],
   };
+}
+
+const NO_MATERIAL = /材料が足りません|該当する記載はありません/;
+const draftOf = (ctx, id) => {
+  const v = ctx.drafts?.[id];
+  return (typeof v === "string" && v.trim() && !NO_MATERIAL.test(v)) ? v.trim() : null;
+};
+const oku = (v) => (v === null || v === undefined) ? "—" : `${(v / 1e8).toFixed(1)}億円`;
+
+/**
+ * 「主な経営指標の状況」の所見。
+ * 事業 → 成長性 → 資金需要 → 借入とエクイティで自己資本比率がどう変わるか → 結論。
+ */
+export function keieiStory(ctx, { years, get, seg, pf }) {
+  const items = [];
+
+  // 事業がどうか：売上の推移と、いちばん大きい事業
+  const s0 = get("売上高", years[0]), s1 = get("売上高", years[years.length - 1]);
+  const n0 = get("純利益", years[years.length - 1]);
+  let biz = "";
+  if (s0 > 0 && s1 > 0 && years.length >= 2) {
+    const cagr = Math.pow(s1 / s0, 1 / (years.length - 1)) - 1;
+    biz += `売上高は${years.length - 1}年で${oku(s0)}→${oku(s1)}（年率${cagr >= 0 ? "+" : "−"}${Math.abs(cagr * 100).toFixed(1)}%）` +
+      (n0 !== null ? `、直近期の純利益は${n0 < 0 ? "△" : ""}${oku(Math.abs(n0))}。` : "。");
+  }
+  if (seg.length) {
+    const total = seg.reduce((a, x) => a + x[1], 0);
+    const top = [...seg].sort((x, y) => y[1] - x[1])[0];
+    if (total > 0) biz += `売上の${Math.round(top[1] / total * 100)}%を${top[0]}が占める。`;
+  }
+  items.push(biz || TODO("事業の状況を1行"));
+
+  // 成長性があるのはどこか（下書き）
+  items.push(draftOf(ctx, "growthArea") || TODO("成長性のある事業・領域を1行"));
+
+  // 成長を速めるには資金が要る。
+  // 黒字なのに営業CFがマイナスの会社（不動産の仕入れ・在庫の積み上がり）は、設備投資ではなく
+  // 仕入れの資金を借入で賄っている。アグレ都市デザインで「投資年1.6億円、自己資金では28.8億円不足」
+  // と書いて実態を取り違えたので、書き分ける。
+  const a = pf.cashAnalysis;
+  const last3 = years.slice(-3);
+  const sum = (k) => { let t = 0, g = false; for (const y of last3) { const v = get(k, y); if (v !== null) { t += v; g = true; } } return g ? t : null; };
+  const ope3 = sum("営業CF"), fin3 = sum("財務CF"), net3 = sum("純利益");
+  if (ope3 !== null && ope3 < 0 && net3 !== null && net3 > 0) {
+    items.push(`利益は出ているが、営業CFは直近${last3.length}期累計で△${oku(-ope3)}（仕入れ・在庫の積み上がりなど）。` +
+      (fin3 !== null && fin3 > 0 ? `成長のための資金を借入などで賄っている（財務CF累計＋${oku(fin3)}` +
+        (pf.debt ? `、有利子負債${oku(pf.debt)}` : "") + "）。" : "") +
+      "成長速度を高めるには、仕入れ・投資のための資金が必要。");
+  } else {
+    const need = [];
+    if (a?.capexPerYear > 0) need.push(`直近3期の投資は年平均${oku(a.capexPerYear)}`);
+    if (a?.gap > 0 && a?.opeCf >= 0) need.push(`自己資金では年${oku(a.gap)}不足`);
+    items.push("成長速度を高めるには、投資のための資金が必要" + (need.length ? `（${need.join("、")}）。` : "。"));
+  }
+
+  // 借入とエクイティで自己資本比率がどう変わるか（調達額は株価を入れたときの予定額）
+  const price = ctx.market?.price ?? null;
+  const voting = ctx.basis?.voting;
+  const raise = price && voting ? price * Math.floor(voting * (ctx.dilution || 0) / 1000) * 1000 : null;
+  const assets = get("総資産", years[years.length - 1]);
+  const r = pf.eqRatio;
+  let lead = TODO("このページの結論を一文で");
+  if (raise && assets && r !== null) {
+    const e = assets * r;
+    const byDebt = e / (assets + raise), byEq = (e + raise) / (assets + raise);
+    items.push(`同じ${oku(raise)}を借入で賄うと自己資本比率は${pct(r)}→${pct(byDebt)}に低下、` +
+      `エクイティなら${pct(byEq)}に上昇（試算）。`);
+    items.push("エクイティファイナンスにより、成長資金の確保と財務基盤の拡充を同時に図れる。");
+    lead = `成長投資の資金を確保しつつ、自己資本比率（${pct(r)}）の低下を避けるため、エクイティファイナンスによる財務基盤の拡充が有効`;
+  } else {
+    items.push(r !== null ? `自己資本比率は${pct(r)}。借入で賄うと自己資本比率は低下する。` : TODO("借入で賄った場合の財務への影響"));
+    items.push("エクイティファイナンスにより、成長資金の確保と財務基盤の拡充を同時に図れる。");
+  }
+  return { items, lead };
 }

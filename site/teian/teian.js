@@ -9,9 +9,10 @@ import {
   potentialShares, dailyExercise, daysNeeded, marketCap,
   maxDilutionFor, dilutedRatio, checkBasis,
 } from "./sim.js";
-import { analyze } from "./shikin.js";
+import { analyze, segUnit } from "./shikin.js";
 import { buildGenjo } from "./genjo.js";
 import { jigyoMid } from "./jigyo.js";
+import { holderLabel } from "./shindan.js";
 import { pageBackup } from "./backup.js";
 import { pageKeiei } from "./keiei.js";
 import { pageSimEnd, pageSimMonthly, pageSimAfter } from "./sim2.js";
@@ -50,7 +51,8 @@ const num = (v) => {
 };
 
 /** 百万円に直して整数で返す。単位はEDINETが円なので1e6で割る。 */
-const mm = (v) => (v === null ? null : Math.round(v / 1e6));
+// 百万円未満は切り捨て（有報の表記。ページごとに四捨五入と混ざると同じ数字が1違って見える）。
+const mm = (v) => (v === null ? null : Math.trunc(v / 1e6));
 
 const fmt = (v) => (v === null || v === undefined) ? "—" : v.toLocaleString("ja-JP");
 const oku = (v) => (v === null ? "—" : (v / 1e8).toFixed(1));
@@ -115,7 +117,7 @@ export function shareholders(rows) {
     address: r[2] || "",
     shares: num(r[3]) === null ? null : num(r[3]) * unit(r[4]),
     ratio: num(r[5]) === null ? null : num(r[5]) / 100,
-  })).filter((r) => r.name);
+  })).filter((r) => r.name).map((r) => ({ ...r, label: holderLabel(r.name) }));
 }
 
 /** 所有者別状況。[区分, 株主数, 株式数, 比率] */
@@ -289,39 +291,59 @@ function pageVoting(ctx) {
       ].filter(Boolean),
     }],
     tables: [
-      rows.length ? {
+      // 内訳の表は、下の表（安定株主の印と合計行つき）と重なるので出さない。
+      false && rows.length ? {
         caption: `${label}の内訳`,
         head: ["株主名", "保有株数", "議決権比率"],
         rows: rows.map((r) => [
-          r.name, fmt(r.shares),
+          r.label, fmt(r.shares),
           basis.voting && r.shares ? pct(r.shares / basis.voting, 2) : "—",
         ]),
         foot: cur !== null
           ? ["合計", fmt(stable.shares), pct(cur, 2)] : null,
       } : null,
       // 株主を選んでいないと行が無く、見出しだけの表になる。出さない。
-      basis.voting && rows.length ? dilutionTable(ctx, rows, label) : null,
+      // 大株主の希薄化後の比率は、安定株主を選んでいなくても出す（本人の指定）。
+      basis.voting && (ctx.sec?.sh || []).length ? dilutionTable(ctx, rows, label) : null,
     ].filter(Boolean),
+    // 表が6列・12行あるので、右半分では入りきらない。上に文章、下に全幅の表。
+    layout: "stack",
     notes: ["大量保有報告書、変更報告書をもとに作成"],
   };
 }
 
-/** 希薄化率ごとの議決権比率推移。 */
+/**
+ * 希薄化率ごとの新株発行数と、大株主それぞれの希薄化後の議決権比率。
+ * 列は 5%・10%・想定の希薄化率・維持できる上限。行は新株発行数と大株主上位10名、
+ * 安定株主を選んでいればその合計（本人の指定）。
+ */
 function dilutionTable(ctx, rows, label) {
   const { basis, dilution } = ctx;
-  const scen = [0.10, dilution, 0.25].sort((a, b) => a - b);
-  const head = ["希薄化率", ...scen.map((d) => pct(d))];
-  const body = rows.map((r) => [
-    r.name,
-    ...scen.map((d) => r.shares
-      ? pct(dilutedRatio(r.shares / basis.voting, d), 2) : "—"),
-  ]);
-  const total = ctx.stable?.ratio ?? null;
+  const list = shareholders(ctx.sec?.sh).slice(0, 10);
+  const cur = ctx.stable?.ratio ?? null;
+  const cap = cur !== null ? maxDilutionFor(cur, ctx.stable?.keep ?? 0.5) : null;
+  const scen = [...new Set([0.05, 0.10, dilution, ...(cap > 0 ? [cap] : [])]
+    .map((d) => Math.round(d * 1000) / 1000))].sort((x, y) => x - y);
+  const tag = (d) => pct(d) + (d === Math.round(dilution * 1000) / 1000 ? "（想定）" : "")
+    + (cap > 0 && d === cap ? "（上限）" : "");
+  const picked = new Set((ctx.stable?.picked || []).map((i) => shareholders(ctx.sec?.sh)[i]?.name));
   return {
-    caption: `希薄化率と${label}の議決権比率`,
-    head, rows: body,
-    foot: total !== null
-      ? ["合計", ...scen.map((d) => pct(dilutedRatio(total, d), 2))] : null,
+    caption: `希薄化率ごとの新株発行数と大株主の議決権比率`,
+    head: ["", "現状", ...scen.map(tag)],
+    rows: [
+      ["新株発行数（株）", "—", ...scen.map((d) => fmt(potentialShares(basis.voting, d)))],
+      ["議決権株式数（株）", fmt(basis.voting), ...scen.map((d) => fmt(basis.voting + potentialShares(basis.voting, d)))],
+      ...list.map((r) => [
+        r.label + (picked.has(r.name) ? `（${label}）` : ""),
+        r.shares ? pct(r.shares / basis.voting, 2) : "—",
+        ...scen.map((d) => r.shares
+          ? pct(r.shares / (basis.voting + potentialShares(basis.voting, d)), 2) : "—"),
+      ]),
+    ],
+    foot: cur !== null
+      ? [`${label}合計`, pct(cur, 2), ...scen.map((d) =>
+          pct(ctx.stable.shares / (basis.voting + potentialShares(basis.voting, d)), 2))] : null,
+    note: "希薄化率＝新株発行数÷議決権株式数（1,000株未満切り捨て）。希薄化後の議決権比率＝保有株数÷（議決権株式数＋新株発行数）。",
   };
 }
 
@@ -649,9 +671,12 @@ function pageGrowth(ctx) {
 
   const rows = [line("売上高", "売上高")];
   // セグメント別の売上。当期しか取れないので、取れた年度だけ埋める。
+  // セグメントの単位（千円・百万円・円）は会社で違うので、連結売上高との比で判定する。
+  const segRaw = (sec?.seg || []).map((s) => num(s[1])).filter((v) => v !== null);
+  const segMul = segUnit(segRaw, num(fin["売上高"]?.[years[years.length - 1]]));
   for (const s of (sec?.seg || [])) {
     const name = (s[0] || "").trim();
-    const v = num(s[1]);
+    const v = num(s[1]) === null ? null : num(s[1]) * segMul;
     if (!name || v === null) continue;
     rows.push([`　${name}`, ...years.map((y, i) =>
       i === years.length - 1 ? fmt(mm(v)) : "—")]);
@@ -759,7 +784,7 @@ function pageShareholders(ctx) {
         caption: `大株主上位${list.length}位の状況`,
         head: ["順位", "株主名", "保有比率", "保有株数"],
         rows: list.map((r, i) => [
-          String(r.rank ?? i + 1), r.name,
+          String(r.rank ?? i + 1), r.label,
           r.ratio != null ? pct(r.ratio, 2) : "—", fmt(r.shares),
         ]),
       } : null,

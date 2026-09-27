@@ -71,6 +71,14 @@ export function holderKind(name) {
 const normName = (s) => String(s || "").replace(/[\s　]+/g, "");
 
 /**
+ * 資料に出す株主名。個人は空白を詰めて「様」を付ける（本人の指定・既存の提案書の表記）。
+ * 法人・信託口などはそのまま。
+ */
+export function holderLabel(name, kind = holderKind(name)) {
+  return kind === "個人" ? `${normName(name)} 様` : String(name || "").replace(/\s+/g, " ").trim();
+}
+
+/**
  * 事業法人のうち、親会社や創業家の資産管理会社らしいもの。
  * 10%以上を持つ事業法人は持ち合い（政策保有）ではなく、親会社か資産管理会社のことが多い。
  * 「株式会社KIM」「株式会社SC」のような短い英字の社名も資産管理会社によくある。
@@ -91,7 +99,10 @@ function holders(rows) {
     name: String(r[1] || "").replace(/\s+/g, " ").trim(),
     shares: num(r[3]) === null ? null : num(r[3]) * unit(r[4]),
     ratio: num(r[5]) === null ? null : num(r[5]) / 100,
-  })).filter((r) => r.name).map((r) => ({ ...r, kind: holderKind(r.name) }));
+  })).filter((r) => r.name).map((r) => {
+    const kind = holderKind(r.name);
+    return { ...r, kind, label: holderLabel(r.name, kind) };
+  });
 }
 
 /** 役員の保有株数の合計。[役職, 氏名, 生年月日, 任期, 株数, 単位] */
@@ -341,7 +352,7 @@ export function diagnose(ctx, pf = profile(ctx)) {
       id: "major", title: `大株主の集中：筆頭株主が${pct(pf.top.ratio)}を保有`,
       score: pf.top.ratio >= 0.33 || ownerSum >= 0.5 ? 2 : 1,
       evidence: [
-        ...pf.owners.slice(0, 4).map((h) => `${h.name}（${looksLikeOwner(h)
+        ...pf.owners.slice(0, 4).map((h) => `${h.label}（${looksLikeOwner(h)
           ? "親会社・資産管理会社の可能性" : h.kind}）${pct(h.ratio, 2)}`),
         pf.owners.length > 1 ? `合計 ${pct(ownerSum, 1)}` : null,
       ].filter(Boolean),
@@ -355,7 +366,7 @@ export function diagnose(ctx, pf = profile(ctx)) {
     out.push({
       id: "crossheld", title: `当社株の持ち合い：銀行・保険・事業会社が${pct(pf.policyHeldRatio)}を保有（大株主上位）`,
       score: pf.policyHeldRatio >= 0.15 ? 2 : 1,
-      evidence: pf.policyHeld.slice(0, 5).map((h) => `${h.name}（${h.kind}）${pct(h.ratio, 2)}`),
+      evidence: pf.policyHeld.slice(0, 5).map((h) => `${h.label}（${h.kind}）${pct(h.ratio, 2)}`),
       products: ["政策株式の売却（売出しで受け皿を作る）", "自社株買い（受け皿として）"],
       note: "持ち合い解消の流れで売却が出やすい。10%以上の事業法人と短い英字の社名は、親会社・資産管理会社として除いてある。",
     });

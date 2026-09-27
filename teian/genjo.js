@@ -18,7 +18,8 @@ const num = (v) => {
   const x = Number(t);
   return Number.isFinite(x) ? x : null;
 };
-const mm = (v) => (v === null || v === undefined ? null : Math.round(v / 1e6));
+// 百万円未満は切り捨て（有報の表記。ページごとに四捨五入と混ざると同じ数字が1違って見える）。
+const mm = (v) => (v === null || v === undefined ? null : Math.trunc(v / 1e6));
 const fmt = (v) => (v === null || v === undefined) ? "—" : Math.round(v).toLocaleString("ja-JP");
 const pct = (v, d = 1) => (v === null || v === undefined) ? "—" : `${(v * 100).toFixed(d)}%`;
 const pt = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}pt`;
@@ -273,7 +274,7 @@ export function pageCapital(ctx) {
   // 信託口と証券会社（個人の信用取引などの預かり）は、実質の持ち主ではないので外す。
   const top = pf.holders.filter((h) => h.kind !== "信託・カストディ" && h.kind !== "証券会社").slice(0, 3);
   if (top.length) {
-    items.push("主な株主は" + top.map((h) => `${h.name}（${pct(h.ratio, 1)}）`).join("、") + "。");
+    items.push("主な株主は" + top.map((h) => `${h.label}（${pct(h.ratio, 1)}）`).join("、") + "。");
   }
 
   // 所有者別はまとめて短くする（外国は法人と個人を足す）
@@ -315,7 +316,7 @@ export function pageCapital(ctx) {
       pf.holders.length ? {
         caption: "大株主上位5位",
         head: ["株主名", "区分", "比率"],
-        rows: pf.holders.slice(0, 5).map((h) => [h.name,
+        rows: pf.holders.slice(0, 5).map((h) => [h.label,
           looksLikeOwner(h) ? `${h.kind}（資産管理会社か）` : h.kind, pct(h.ratio, 2)]),
       } : null,
     ].filter(Boolean),

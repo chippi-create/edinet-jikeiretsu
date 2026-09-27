@@ -349,3 +349,17 @@ export function analyze({ fin, ext, opts = {} }) {
       .filter((k) => pick(k) === null),
   };
 }
+
+/**
+ * セグメント別売上の単位を円に直す係数。
+ * 有報のセグメント情報は会社によって千円単位・百万円単位・円単位が混ざる。
+ * 円として割ったらアグレ都市デザインのハウジング事業が「30百万円」になった（正しくは30,368百万円）。
+ * セグメントの合計と連結売上高を比べ、1・1,000・1,000,000のうち一番近いものを採る。
+ */
+export function segUnit(segValues, salesYen) {
+  const total = (segValues || []).reduce((a, v) => a + (v > 0 ? v : 0), 0);
+  if (!(total > 0) || !(salesYen > 0)) return 1;
+  const r = salesYen / total;
+  const cands = [1, 1e3, 1e6];
+  return cands.reduce((best, c) => Math.abs(Math.log10(r / c)) < Math.abs(Math.log10(r / best)) ? c : best, 1);
+}

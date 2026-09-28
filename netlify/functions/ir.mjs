@@ -318,6 +318,18 @@ function xjSeed(code) {
   return `https://www.xj-storage.jp/public-list/GetList2.aspx?company=${code}0&len=10000`;
 }
 
+/**
+ * 宝印刷の社内ID（AS08676 のような形）を見つける。
+ * 証券コード＋0 で引ける会社と、社内IDでしか引けない会社がある。ポート（7047）は
+ * company=70470 だと1件しか返らず、company=AS08676 だと最新まで911件返った。
+ * 会社のサイトが読み込む xj-storage のJSのURLや本文に、この社内IDが書かれている。
+ */
+function xjIds(text, url) {
+  const src = `${url}\n${text}`;
+  if (!/xj-storage/i.test(src)) return [];
+  return [...new Set([...src.matchAll(/\b(AS\d{5})\b/g)].map((m) => m[1]))];
+}
+
 /** 宝印刷のXMLから資料を拾う。<item>ごとに題名・日付・PDFが並ぶ。 */
 function fromXML(text) {
   const out = [];
@@ -460,6 +472,13 @@ export default async (req) => {
     // JSでもHTMLのリンクが書かれていることがあるので、両方見る。
     if (!isHTML) for (const d of fromHTML(text, r.url)) {
       if (!docs.has(d.url)) docs.set(d.url, d);
+    }
+
+    // 宝印刷の社内IDが見つかったら、その一覧を先頭に積む（証券コードでは引けない会社がある）。
+    for (const id of xjIds(text, r.url)) {
+      const u = `https://www.xj-storage.jp/public-list/GetList2.aspx?company=${id}&len=10000`;
+      if (visited.includes(u) || queue.some((q) => q.url === u)) continue;
+      queue.unshift({ url: u, depth: 0, sibling: true });
     }
 
     // 配信元が1本見つかったら、その兄弟をまとめて先頭に積む。

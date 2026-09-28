@@ -414,7 +414,13 @@ export function diagnose(ctx, pf = profile(ctx)) {
     if (pf.op !== null && pf.op < 0 && pf.opPrev !== null && pf.opPrev < 0) {
       score++; ev.push("営業赤字が2期続いている");
     }
-    if (a.gap > 0) { score++; ev.push(`投資に対して自己資金が${oku(a.gap)}足りない`); }
+    // 黒字なのに営業CFがマイナスの会社（不動産の仕入れ・在庫の積み上がり）は、不足の中身が
+    // 設備投資ではなく仕入れの資金。「投資に対して自己資金が足りない」と書くと取り違える
+    // （アグレ都市デザイン：投資年1.6億円に対して28.8億円不足と出ていた）。
+    const opeNeg = a.opeCf < 0 && pf.net !== null && pf.net > 0;
+    if (opeNeg) {
+      score++; ev.push("黒字だが営業CFがマイナス（仕入れ・在庫の積み上がりなど）で、借入などで資金を補っている");
+    } else if (a.gap > 0) { score++; ev.push(`投資に対して自己資金が${oku(a.gap)}足りない`); }
     if (a.projection?.shortfallYear) {
       score++; ev.push(`いまのペースだと${a.projection.shortfallYear}年後に手元資金の下限を割る`);
     }

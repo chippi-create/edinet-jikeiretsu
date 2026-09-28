@@ -481,9 +481,15 @@ async function fillGaiyo(my) {
       const rows = historyRows(r.ok ? await r.json() : []);
       if (my === gaiyoToken && $("yh-hist")) {
         $("yh-hist").classList.remove("wait");
+        const minor = rows.filter((x) => x.minor).length;
         $("yh-hist").innerHTML = rows.length
-          ? `<table>${rows.map((x) => `<tr><td style="white-space:nowrap">${esc(x.ym)}</td><td>${esc(x.what)}</td>` +
-              `<td class="mk">${esc(x.mark)}</td></tr>`).join("")}</table>` : "沿革を読み取れなかった。";
+          ? `<table>${rows.map((x) => `<tr class="${x.minor ? "minor hide" : ""}"><td style="white-space:nowrap">${esc(x.ym)}</td>` +
+              `<td>${esc(x.what)}</td><td class="mk">${esc(x.mark)}</td></tr>`).join("")}</table>` +
+            (minor ? `<p class="note">ほかに資本金の増資の記載が${minor}件（新株予約権の行使など）。` +
+              `<a href="#" id="yh-minor">表示する</a></p>` : "")
+          : "沿革を読み取れなかった。";
+        const t = $("yh-minor");
+        if (t) t.onclick = (e) => { e.preventDefault(); $("yh-hist").querySelectorAll("tr.minor").forEach((r) => r.classList.remove("hide")); t.remove(); };
       }
     } catch { put("yh-hist", "沿革を読み込めなかった。"); }
   }

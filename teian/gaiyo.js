@@ -78,6 +78,8 @@ export function historyRows(hist) {
     ym, what,
     mark: /設立|創業/.test(what) ? "設立" : /上場|市場第|市場へ|市場に/.test(what) ? "上場"
       : /商号|社名/.test(what) ? "商号変更" : /持株会社|合併|買収|子会社化|譲受/.test(what) ? "再編・M&A" : "",
+    // 「資本金を◯円に増資」だけの行（新株予約権の行使など）は節目が埋もれるので、画面で畳む。
+    minor: /^資本金を[^。]*に増資。?$/.test(String(what).trim()),
   }));
 }
 

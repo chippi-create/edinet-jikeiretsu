@@ -26,6 +26,9 @@ const MAX_HTML = 5 * 1024 * 1024;
 const MAX_PDF = 25 * 1024 * 1024;
 const MAX_TEXT = 120000;
 const MAX_FETCH = 34;      // 1回の探索で叩く上限。相手に負担をかけないため。
+// 配信元のファイル名を番号で当てにいく試行は別枠。ベルトラ（7048）では当て推量30回が
+// 全部「ファイルが無い」で34回の枠を使い切り、最新資料のある会社のサイトを見に行かなかった。
+const MAX_PROBE = 40;
 const BUDGET = 18000;      // 全体の持ち時間。関数の上限(26秒)より手前で切り上げる。
 
 // IRページ・IR用JSらしさの見分け方。会社ごとにばらばらなので広めに取る。
@@ -70,11 +73,11 @@ function safeURL(raw, base) {
 }
 
 function makeFetcher(deadline) {
-  let count = 0;
-  return async function get(url, limit) {
-    if (count >= MAX_FETCH) return { error: "これ以上たどりません" };
+  let count = 0, probes = 0;
+  return async function get(url, limit, probe = false) {
+    if (probe ? probes >= MAX_PROBE : count >= MAX_FETCH) return { error: "これ以上たどりません" };
     if (Date.now() > deadline) return { error: "時間切れ" };
-    count++;
+    if (probe) probes++; else count++;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), Math.min(TIMEOUT, deadline - Date.now()));
     try {
@@ -137,7 +140,7 @@ function score(url) {
   const u = url.toLowerCase();
   let n = 0;
   if (/\.js(\?|$)/.test(u)) n += 8;                       // JSが資料の実体を持っている
-  if (/eir-parts|pronexus|net-ir|irwebsite|nikkei|qri/.test(u)) n += 8;  // 配信元
+  if (/eir-parts|pronexus|net-ir|irwebsite|nikkei|qri|swcms/.test(u)) n += 8;  // 配信元
   if (/\/parts\//.test(u)) n += 4;
   if (/tanshin|material|press|library|kessan|setsumei|presentation/.test(u)) n += 4;
   if (/chuki|chukei|plan|vision|meeting|yuho|report/.test(u)) n += 2;
@@ -422,14 +425,17 @@ export default async (req) => {
   // 止まってしまい、決算短信のページまで行かなかった。本数ではなく
   // 「欲しい種類が取れたか」で判断する。
   const explicit = Boolean(body.url);
+  // 配信元に古い一覧だけが残っていることがある（ベルトラは2021年までの一覧が残っていた）。
+  // 決算短信・説明資料が「直近1年余り」のものであるときだけ、十分とみなす。
+  const recent = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
   const haveKey = () => [...docs.values()].some(
-    (d) => d.kind === "決算短信" || d.kind === "決算説明資料");
+    (d) => (d.kind === "決算短信" || d.kind === "決算説明資料") && (d.date || "") >= recent);
 
   while (queue.length && Date.now() < deadline) {
     if (!explicit && haveKey() && docs.size >= 20 && !queue[0].sibling) break;
-    const { url, depth } = queue.shift();
+    const { url, depth, sibling } = queue.shift();
     if (visited.includes(url)) continue;
-    const r = await get(url, MAX_HTML);
+    const r = await get(url, MAX_HTML, Boolean(sibling));
     visited.push(url);
     if (r.error) { notes.push(`${url}: ${r.error}`); continue; }
 

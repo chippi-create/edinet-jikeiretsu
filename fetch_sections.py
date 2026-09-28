@@ -18,6 +18,7 @@ fetch_sections.py — 有報の記述部分を集める
 
 import os
 import csv
+import unicodedata
 import re
 import sys
 import json
@@ -42,6 +43,11 @@ RISK_DIR = os.path.join(DATA_DIR, "risks")
 # 役員の略歴も同じ理由で会社ごとに分ける。1人あたり数百字あり、
 # 全社ぶんを officers.csv に入れると30MB近くなって毎日書き換わる。
 BIO_DIR = os.path.join(DATA_DIR, "bios")
+# 沿革は会社ごとのファイル。[[年月, 事項], ...]
+HIST_DIR = os.path.join(DATA_DIR, "history")
+
+# 取得する項目の版。項目を足したらここを変える。版が違う会社は取り直す（記録は消さない）。
+SECTIONS_VERSION = "2026-09-28 沿革・経営方針"
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")
 SEGMENTS = os.path.join(DATA_DIR, "segments.csv")
 # 要約を書くための材料。事業の内容だけでは仕入や販売先が分からないので、
@@ -311,8 +317,13 @@ def main():
     picked = fetch2.pick_docs(index, targets=codes or None, quiet=True)
     if codes:
         log(f"■ 証券コード指定: {codes}")
-    pending = [s for s in sorted(picked)
-               if state.get(s, {}).get("docID") != picked[s]["本体"]["docID"]]
+    # 書類が新しくなった会社と、前の版で取った会社を取り直す。
+    # 一度も取れていない会社（新しい書類）を先に、版だけ古い会社を後に回す。
+    def stale(s):
+        st = state.get(s, {})
+        return st.get("docID") != picked[s]["本体"]["docID"] or st.get("版") != SECTIONS_VERSION
+    pending = sorted((s for s in picked if stale(s)),
+                     key=lambda s: (state.get(s, {}).get("docID") == picked[s]["本体"]["docID"], s))
     log(f"■ 索引 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。")
@@ -348,6 +359,9 @@ def main():
             "customers": sections.text_of(blocks.get("InformationForEachOfMainCustomersTextBlock", "")),
             # 政策保有株式。売却提案のほか、資金余力の判断にも使う。
             "shareholdings": sections.text_of(blocks.get("ShareholdingsTextBlock", "")),
+            # 経営方針・経営環境・対処すべき課題。有報の要約（/api/yuho）の材料。
+            "policy": sections.text_of(blocks.get(
+                "BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock", "")),
         }
         os.makedirs(CONTEXT_DIR, exist_ok=True)
         cpath = os.path.join(CONTEXT_DIR, f"{sec}.json")
@@ -400,14 +414,24 @@ def main():
         elif os.path.exists(bpath):
             os.remove(bpath)
 
-        log(f"  {sec} {name}: {host or 'サイト不明'} / セグメント{len(seg)}件 / 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
+        # 沿革。表の各行から「年月」と「事項」を取り出す。表になっていない会社は本文の行から拾う。
+        hist = parse_history(blocks.get("CompanyHistoryTextBlock", ""))
+        os.makedirs(HIST_DIR, exist_ok=True)
+        hpath = os.path.join(HIST_DIR, f"{sec}.json")
+        if hist:
+            with open(hpath, "w", encoding="utf-8") as fp:
+                json.dump(hist, fp, ensure_ascii=False, separators=(",", ":"))
+        elif os.path.exists(hpath):
+            os.remove(hpath)
+
+        log(f"  {sec} {name}: {host or 'サイト不明'} / 沿革{len(hist)}行 / セグメント{len(seg)}件 / 事業{len(btxt)}字 / 配当{len(dtxt)}字 / リスク{len(rtxt)}字 "
             f"/ 所有者別{len(own[sec])}区分 / 大株主{len(sh[sec])}名 / 役員{len(of[sec])}名")
         done += 1
         if done % 25 == 0:
             save_all(own, sh, of, biz, div, web, segs, state)
             log(f"   （途中保存：{done}社）")
 
-        state[sec] = {"docID": doc["docID"],
+        state[sec] = {"docID": doc["docID"], "版": SECTIONS_VERSION,
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
@@ -422,6 +446,38 @@ def main():
         log(f"■ 残り {remain}社。次回の実行で続きから取得します。")
     if failed:
         log(f"■ 取得できなかった会社: {failed}")
+
+
+YM = re.compile(r"(\d{4}|[明大昭平令][治正和成]?\s*\d{1,2}|[明大昭平令][治正和成]?元)\s*年\s*(\d{1,2}\s*月)?")
+
+
+def parse_history(html):
+    """沿革を [[年月, 事項], ...] にする。
+
+    多くの会社は「年月｜事項」の2列の表。年月が「2009年４月」のほか、
+    和暦や年だけのこともある。1列目に年が無い行（見出し）は捨てる。
+    表になっていない会社は、本文の各行の先頭の年月で切る。
+    """
+    if not html:
+        return []
+    out = []
+    for tab in sections.tables_of(html):
+        for row in tab:
+            cells = [re.sub(r"\s+", " ", c).strip() for c in row if c and c.strip()]
+            if len(cells) < 2:
+                continue
+            ym = unicodedata.normalize("NFKC", cells[0])
+            if not YM.search(ym):
+                continue
+            out.append([ym, " ".join(cells[1:])])
+    if out:
+        return out
+    for line in sections.text_of(html).split("\n"):
+        t = unicodedata.normalize("NFKC", line).strip()
+        m = YM.match(t)
+        if m and len(t) > m.end() + 2:
+            out.append([m.group(0).strip(), t[m.end():].strip(" 　:：")])
+    return out
 
 
 def save_all(own, sh, of, biz, div, web, segs, state):

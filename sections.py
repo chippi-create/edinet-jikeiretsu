@@ -33,12 +33,17 @@ TARGETS = {
     "ShareholdingByShareholderCategoryTextBlock": "所有者別状況",
     "MajorShareholdersTextBlock": "大株主の状況",
     "InformationAboutOfficersTextBlock": "役員の状況",
+    # 沿革。「年月｜事項」の表。probeでアグレ都市デザイン・菊池を見てから足した。
+    "CompanyHistoryTextBlock": "沿革",
+    # 経営方針、経営環境及び対処すべき課題等。有報の要約（提案書ツール）で使う。
+    "BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock": "経営方針・対処すべき課題",
 }
 
 # 表ではなく文章として読むもの。段落の区切りを残す必要がある。
 PROSE = {"DescriptionOfBusinessTextBlock", "DividendPolicyTextBlock",
          "BusinessRisksTextBlock", "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock",
-         "MajorFacilitiesTextBlock", "ShareholdingsTextBlock"}
+         "MajorFacilitiesTextBlock", "ShareholdingsTextBlock",
+         "BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock"}
 
 
 def log(*a):

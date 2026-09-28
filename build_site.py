@@ -262,6 +262,8 @@ def main():
     has_risk = copy_per_company("risks", "risk", ".txt")
     # 役員の略歴も同じ扱い。役員のタブを開いたときだけ取りに行く。
     has_bio = copy_per_company("bios", "bio", ".json")
+    # 沿革。提案書ツールの「会社のこと」で読む。
+    has_hist = copy_per_company("history", "hist", ".json")
     # 要約を作るときだけ読む材料。サイトの表示には使わない。
     copy_per_company("context", "context", ".json")
 
@@ -269,7 +271,7 @@ def main():
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
     secs = load_sections()
     sbuckets = defaultdict(dict)
-    for sec in set(secs) | has_risk | has_bio:
+    for sec in set(secs) | has_risk | has_bio | has_hist:
         if sec not in companies:
             continue
         obj = secs.get(sec, {})
@@ -277,6 +279,8 @@ def main():
             obj["r"] = 1
         if sec in has_bio:
             obj["b"] = 1
+        if sec in has_hist:
+            obj["h"] = 1
         sbuckets[bucket_of(sec)][sec] = obj
     for b, obj in sbuckets.items():
         with open(os.path.join(SITE, "s", f"{b}.json"), "w", encoding="utf-8") as f:

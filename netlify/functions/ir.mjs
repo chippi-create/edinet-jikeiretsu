@@ -142,7 +142,15 @@ function score(url) {
   if (/\.js(\?|$)/.test(u)) n += 8;                       // JSが資料の実体を持っている
   if (/eir-parts|pronexus|net-ir|irwebsite|nikkei|qri|swcms/.test(u)) n += 8;  // 配信元
   if (/\/parts\//.test(u)) n += 4;
-  if (/tanshin|material|press|library|kessan|setsumei|presentation/.test(u)) n += 4;
+  if (/tanshin|material|library|kessan|setsumei|presentation/.test(u)) n += 4;
+  // 「press」は配信元のファイル（press_2.js など）のときだけ加点する。
+  // 会社のサイトの /press/（プレスリリースの記事一覧）を高く見ると、ベルトラ（7048）では
+  // 個別記事を20本たどって上限に達し、IRページ（/ja/ir.html）に行かなかった。
+  if (/press_\d|\/press\/[^\/]*\.js/.test(u)) n += 4;
+  // 会社のサイトのIRトップ。資料一覧へのリンクがここに並ぶ。
+  if (/\/ir(\.html?|\/(index\.html?)?)?$/.test(u.replace(/[?#].*$/, ""))) n += 6;
+  // 個別記事（末尾が番号）とフィードは資料一覧ではない。
+  if (/\/\d{3,}\/?$|\/feed\/?$/.test(u.replace(/[?#].*$/, ""))) n -= 5;
   if (/chuki|chukei|plan|vision|meeting|yuho|report/.test(u)) n += 2;
   // ライブラリの下の各ページ（短信・説明資料・その他）は、
   // それぞれが別の配信元JSを抱えている。ここを回らないと種類が偏る。

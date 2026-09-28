@@ -79,6 +79,15 @@
   .draft { border:1px solid var(--line); border-radius:4px; padding:8px 12px; margin:8px 0; }
   .draft b { font-size:13px; }
   .draft p { margin:4px 0 6px; white-space:pre-line; font-size:14px; }
+  details.ch { border:1px solid var(--line); border-radius:6px; padding:8px 14px; margin:8px 0; }
+  details.ch > summary { cursor:pointer; font-weight:600; font-size:14px; }
+  .part { margin:10px 0 4px; }
+  .part h4 { font-size:13px; margin:0 0 4px; color:var(--accent); }
+  .ai { white-space:pre-line; font-size:14px; }
+  .ai.wait { color:var(--muted); font-size:13px; }
+  .headline { font-size:16px; font-weight:600; margin:6px 0 10px; }
+  td.mk { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .bar2 { display:inline-block; height:8px; background:var(--line2); vertical-align:middle; margin-right:6px; }
   .issue { border:1px solid var(--line); border-radius:6px; padding:10px 14px; margin:8px 0; }
   .issue h4 { margin:0 0 4px; font-size:14px; }
   .issue .sc { color:var(--muted); font-weight:normal; font-size:12px; margin-left:6px; }
@@ -120,6 +129,7 @@
   <div id="loadmsg" class="ok"></div>
 </div>
 <div id="basis" class="card hide"></div>
+<div id="gaiyo" class="hide"></div>
 <div id="shindan" class="hide"></div>
 
 <div id="step2" class="hide">
@@ -217,6 +227,7 @@ import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
+import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
 
 const $ = (id) => document.getElementById(id);
@@ -271,6 +282,9 @@ function clearAll() {
                     "seg", "ckyear", "cksales", "ckop", "ckroe", "exr"]) $(id).value = "";
   $("shindan").innerHTML = "";
   $("shindan").classList.add("hide");
+  $("gaiyo").innerHTML = "";
+  $("gaiyo").classList.add("hide");
+  gaiyoToken++;
   $("months").value = "1.5";
   $("yrs").value = "5";
   delete $("dil").dataset.touched;
@@ -395,7 +409,104 @@ async function load() {
   document.body.classList.add("hasbar");
   $("loadmsg").textContent = "";
   recalcStable();
+  renderGaiyo();
   renderShindan();
+}
+
+// ---- 有報の要約 ------------------------------------------------------------
+// 読み込んだ直後に、有報を章立ての順にまとめて見せる。数字の表は手元で組み、
+// 文章のパートはサーバーの要約（保存して使い回す）を取りに行って差し込む。
+// 会社を読み込み直したら、前の会社の要約が遅れて届いても捨てる（gaiyoToken）。
+let gaiyoToken = 0;
+
+const tbl = (head, rows, cls = "") => `<table class="${cls}"><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+  rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i && /^[\d,\.%\-—△]+$/.test(String(c)) ? "n" : ""}">${esc(c)}</td>`).join("")}</tr>`).join("") + `</table>`;
+const pctS = (v, d = 1) => v === null || v === undefined ? "—" : (v * 100).toFixed(d) + "%";
+
+function renderGaiyo() {
+  if (!ctx) return;
+  const my = ++gaiyoToken;
+  const kt = keyTable(ctx);
+  const seg = segmentRows(ctx);
+  const st = stockFacts(ctx);
+  const partBox = (p) => `<div class="part"><h4>${esc(p.title)}</h4><div class="ai wait" id="yh-${p.part}">要約を作っています…</div></div>`;
+  const ch = (n, title, body) => `<details class="ch" open><summary>第${n} ${esc(title)}</summary>${body}</details>`;
+
+  $("gaiyo").classList.remove("hide");
+  $("gaiyo").innerHTML = `<h2>有報の要約（${esc(ctx.name)}）</h2>
+    <div class="headline" id="yh-head">${esc(ctx.name)}（${esc(ctx.code)}）</div>
+    ${ch(1, "企業の概況",
+      `<div class="part"><h4>主要な経営指標等の推移</h4>${tbl(kt.head, kt.rows)}
+         ${kt.notes.length ? `<p class="note">${kt.notes.map(esc).join(" ")}</p>` : ""}</div>
+       <div class="part"><h4>沿革</h4><div id="yh-hist" class="ai wait">${ctx.sec?.h ? "読み込んでいます…" : "沿革はまだ取得していない（全社に行き渡るまで約1週間）"}</div></div>
+       <div class="part"><h4>事業の内容</h4><div class="ai wait" id="yh-biz">要約を作っています…</div></div>`)}
+    ${ch(2, "事業の状況", TEXT_PARTS.filter((p) => p.chapter === 2).map(partBox).join(""))}
+    ${ch(3, "設備の状況", TEXT_PARTS.filter((p) => p.chapter === 3).map(partBox).join(""))}
+    ${ch(4, "提出会社の状況",
+      `<div class="part"><h4>株式の状況</h4><p class="ai">` +
+        [st.issued ? `発行済株式数 ${st.issued.toLocaleString("ja-JP")}株` : null,
+         st.treasury ? `自己株式 ${st.treasury.toLocaleString("ja-JP")}株` : null,
+         st.unit ? `単元 ${st.unit}株` : null,
+         st.holdersCount ? `株主数 ${st.holdersCount.toLocaleString("ja-JP")}名` : null].filter(Boolean).map(esc).join("／") + `</p></div>` +
+      TEXT_PARTS.filter((p) => p.chapter === 4).map(partBox).join("") +
+      (st.top.length ? `<div class="part"><h4>大株主の状況（上位10名）</h4>${tbl(["株主名", "区分", "比率"],
+        st.top.map((h) => [h.label, h.kind, pctS(h.ratio, 2)]))}</div>` : "") +
+      (st.own.length ? `<div class="part"><h4>所有者別状況</h4>${tbl(["区分", "比率"], st.own.map((o) => [o.category, pctS(o.ratio)]))}</div>` : "") +
+      `<div class="part"><h4>役員の状況</h4><p class="ai">${esc([st.reps.join("、"), st.officerCount ? `役員${st.officerCount}名` : ""].filter(Boolean).join("／") || "—")}</p></div>` +
+      (st.holdings ? `<div class="part"><h4>株式の保有状況</h4><p class="ai">${esc(
+        `政策保有株 ${((st.holdings.total || 0) / 1e8).toFixed(1)}億円` + (st.holdings.count !== null ? `（上場${st.holdings.count}銘柄）` : "") +
+        (st.holdings.pure ? `／純投資目的の上場株 ${(st.holdings.pure / 1e8).toFixed(1)}億円` : ""))}</p></div>` : ""))}
+    ${ch(5, "経理の状況", seg.length ? `<div class="part"><h4>セグメント情報（直近期・百万円）</h4>` +
+      `<table><tr><th>セグメント</th><th>売上高</th><th>構成比</th><th>セグメント利益</th><th>利益率</th></tr>` +
+      seg.map((g) => `<tr><td>${esc(g.name)}</td><td class="n">${Math.trunc(g.sales / 1e6).toLocaleString("ja-JP")}</td>` +
+        `<td><span class="bar2" style="width:${Math.round((g.share || 0) * 80)}px"></span>${pctS(g.share)}</td>` +
+        `<td class="n">${g.profit === null ? "—" : Math.trunc(g.profit / 1e6).toLocaleString("ja-JP")}</td><td class="n">${pctS(g.margin)}</td></tr>`).join("") +
+      `</table></div>` : `<p class="note">セグメント情報は取得できていない（単一セグメントの会社も多い）。</p>`)}
+    <p class="note">数字の表は有価証券報告書（EDINET）から機械的に作成。文章のパートは有報の記載をAIで要約したもの（数字は書かせていない）。
+      要約は保存して使い回すので、2回目以降はすぐ出る。</p>`;
+  fillGaiyo(my);
+}
+
+async function fillGaiyo(my) {
+  const code = ctx.code;
+  const put = (id, text, wait = false) => {
+    if (my !== gaiyoToken) return;
+    const el = $(id); if (!el) return;
+    el.textContent = text; el.classList.toggle("wait", wait);
+  };
+  // 沿革
+  if (ctx.sec?.h) {
+    try {
+      const r = await fetch(DATA ? `${DATA}/hist/${code}.json` : `/hist/${code}.json`);
+      const rows = historyRows(r.ok ? await r.json() : []);
+      if (my === gaiyoToken && $("yh-hist")) {
+        $("yh-hist").classList.remove("wait");
+        $("yh-hist").innerHTML = rows.length
+          ? `<table>${rows.map((x) => `<tr><td style="white-space:nowrap">${esc(x.ym)}</td><td>${esc(x.what)}</td>` +
+              `<td class="mk">${esc(x.mark)}</td></tr>`).join("")}</table>` : "沿革を読み取れなかった。";
+      }
+    } catch { put("yh-hist", "沿革を読み込めなかった。"); }
+  }
+  // 事業の内容（既存の要約）。1行目の【全体】は見出しにも出す。
+  try {
+    const r = await fetch(`${API}/api/summarize?code=${encodeURIComponent(code)}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "");
+    const txt = String(j.summary || "");
+    const head = /【全体】\s*\n?([^\n]+)/.exec(txt);
+    if (head && my === gaiyoToken) $("yh-head").textContent = `${ctx.name}（${ctx.code}）：${head[1].trim()}`;
+    put("yh-biz", txt.replace(/【全体】\s*\n?[^\n]+\n*/, "").trim());
+  } catch (e) { put("yh-biz", e.message || "要約を取得できなかった。", true); }
+  // 文章のパート。順番に取りに行く（並行に投げると上限を一度に使い切るため）。
+  for (const p of TEXT_PARTS) {
+    if (my !== gaiyoToken) return;
+    try {
+      const r = await fetch(`${API}/api/yuho?code=${encodeURIComponent(code)}&part=${p.part}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "");
+      put(`yh-${p.part}`, j.summary);
+    } catch (e) { put(`yh-${p.part}`, e.message || "要約を取得できなかった。", true); }
+  }
 }
 
 /** 画面の入力を ctx に写す。診断と提案書の両方がこれを読む。 */

@@ -47,7 +47,7 @@ BIO_DIR = os.path.join(DATA_DIR, "bios")
 HIST_DIR = os.path.join(DATA_DIR, "history")
 
 # 取得する項目の版。項目を足したらここを変える。版が違う会社は取り直す（記録は消さない）。
-SECTIONS_VERSION = "2026-10-04b 関係会社・新株予約権・自己株式・監査法人・沿革の改行"
+SECTIONS_VERSION = "2026-10-04c 関係会社・新株予約権・自己株式・監査法人・沿革の改行"
 # 株式まわり（関係会社・新株予約権・自己株式・監査法人）は会社ごとのファイル。/kabu/{code}.json
 KABU_DIR = os.path.join(DATA_DIR, "kabu")
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")

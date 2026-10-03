@@ -559,6 +559,12 @@ def parse_history(html):
             if len(yms) > 1 and len(yms) == len(whats) and all(YM.search(y) for y in yms):
                 out.extend([y, w] for y, w in zip(yms, whats))
                 continue
+            # 年月と出来事の数が合わない（1つの年月に2段落の出来事がある）と、どれとどれが組か
+            # 機械では決められない。取り違えると事実と違う沿革になるので、組にせず期間でまとめ、
+            # 出来事は順に並べる。印として3つ目の要素に「未対応」を付ける。
+            if len(yms) > 1 and all(YM.search(y) for y in yms):
+                out.append([f"{yms[0]}〜{yms[-1]}", "／".join(whats), "未対応"])
+                continue
             ym = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", cells[0].replace(SEP, " "))).strip()
             if not YM.search(ym):
                 continue

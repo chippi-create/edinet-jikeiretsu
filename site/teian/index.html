@@ -487,12 +487,15 @@ async function fillGaiyo(my) {
       if (my === gaiyoToken && $("yh-hist")) {
         $("yh-hist").classList.remove("wait");
         const minor = rows.filter((x) => x.minor).length;
+        const unmatched = rows.some((x) => x.unmatched);
         $("yh-hist").innerHTML = rows.length
           ? `<table>${rows.map((x) => `<tr class="${x.minor ? "minor hide" : ""}"><td style="white-space:nowrap">${esc(x.ym)}</td>` +
               `<td>${esc(x.what)}</td><td class="mk">${esc(x.mark)}</td></tr>`).join("")}</table>` +
             (minor ? `<p class="note">ほかに資本金の増資の記載が${minor}件（新株予約権の行使など）。` +
               `<a href="#" id="yh-minor">表示する</a></p>` : "")
           : "沿革を読み取れなかった。";
+        if (unmatched) $("yh-hist").insertAdjacentHTML("beforeend",
+          `<p class="note">一部の行は、有報の表で年月と出来事の数が合わず1対1に対応づけられないため、期間でまとめて出来事を順に並べている。</p>`);
         const t = $("yh-minor");
         if (t) t.onclick = (e) => { e.preventDefault(); $("yh-hist").querySelectorAll("tr.minor").forEach((r) => r.classList.remove("hide")); t.remove(); };
       }

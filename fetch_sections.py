@@ -47,7 +47,7 @@ BIO_DIR = os.path.join(DATA_DIR, "bios")
 HIST_DIR = os.path.join(DATA_DIR, "history")
 
 # 取得する項目の版。項目を足したらここを変える。版が違う会社は取り直す（記録は消さない）。
-SECTIONS_VERSION = "2026-10-04 関係会社・新株予約権・自己株式・監査法人"
+SECTIONS_VERSION = "2026-10-04b 関係会社・新株予約権・自己株式・監査法人・沿革の改行"
 # 株式まわり（関係会社・新株予約権・自己株式・監査法人）は会社ごとのファイル。/kabu/{code}.json
 KABU_DIR = os.path.join(DATA_DIR, "kabu")
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")
@@ -544,15 +544,25 @@ def parse_history(html):
     if not html:
         return []
     out = []
-    for tab in sections.tables_of(html):
+    # 1つのセルに複数の年月と出来事が改行区切りで入っている会社がある（7794）。
+    # 改行がそのまま空白につぶれると1行につながるので、沿革だけは改行を区切りとして残す。
+    SEP = "\u241e"
+    marked = re.sub(r"<br\s*/?>|</p>|</div>", SEP, html, flags=re.I)
+    for tab in sections.tables_of(marked):
         for row in tab:
-            cells = [re.sub(r"\s+", " ", c).strip() for c in row if c and c.strip()]
+            cells = [c for c in row if c and c.replace(SEP, "").strip()]
             if len(cells) < 2:
                 continue
-            ym = unicodedata.normalize("NFKC", cells[0])
+            parts = lambda c: [re.sub(r"\s+", " ", x).strip() for x in c.split(SEP) if x.strip()]
+            yms = [unicodedata.normalize("NFKC", x) for x in parts(cells[0])]
+            whats = parts(" ".join(cells[1:]).replace(SEP + " ", SEP))
+            if len(yms) > 1 and len(yms) == len(whats) and all(YM.search(y) for y in yms):
+                out.extend([y, w] for y, w in zip(yms, whats))
+                continue
+            ym = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", cells[0].replace(SEP, " "))).strip()
             if not YM.search(ym):
                 continue
-            out.append([ym, " ".join(cells[1:])])
+            out.append([ym, re.sub(r"\s+", " ", " ".join(cells[1:]).replace(SEP, " ")).strip()])
     if out:
         return out
     for line in sections.text_of(html).split("\n"):

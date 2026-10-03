@@ -226,6 +226,8 @@ SOLO_ITEMS = [
     ("単体_土地再評価差額金", [r"^RevaluationReserveForLand$"]),
     # 1株当たり配当額。連結を作る会社でも提出会社の文脈にしか載らない。
     ("1株当たり配当", [r"^DividendPaidPerShareSummaryOfBusinessResults$"]),
+    # 株主総利回り（TSR）。提出会社の主要な経営指標に5期分。probeでアグレ都市デザインを確認。
+    ("株主総利回り", [r"^TotalShareholderReturn$"]),
     ("中間配当", [r"^InterimDividendPaidPerShareSummaryOfBusinessResults$"]),
 ]
 
@@ -282,7 +284,7 @@ HOLDING_ITEMS.append(
 
 # 取得する項目の版。項目を足したらここを変える。
 # 記録の版が違う会社は取り直しの対象になる（記録を消さなくてよい）。
-ITEMS_VERSION = "2026-09-27 政策保有株・BS区分"
+ITEMS_VERSION = "2026-10-04 株主総利回り"
 
 NULLS = ("", "-", "－", "―", "NA")
 

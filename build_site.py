@@ -67,6 +67,7 @@ EXTRA = ["発行済株式数", "議決権の個数", "自己株式数", "単体_
          # 貸借対照表の区分と純資産の内訳（主な経営指標の状況・財務シミュレーション）
          "流動資産", "固定資産", "流動負債", "固定負債", "負債合計",
          "資本金", "資本剰余金", "利益剰余金", "株主資本",
+         "株主総利回り",
          *[f"政策保有_{k}{sfx}" for sfx in ("", "_最大保有会社", "_第2位保有会社")
            for k in ("上場_銘柄数", "上場_計上額", "非上場_計上額", "上場_売却額")]]
 
@@ -264,6 +265,8 @@ def main():
     has_bio = copy_per_company("bios", "bio", ".json")
     # 沿革。提案書ツールの「会社のこと」で読む。
     has_hist = copy_per_company("history", "hist", ".json")
+    # 株式まわり（関係会社・新株予約権・自己株式・監査法人）。有報の要約で読む。
+    has_kabu = copy_per_company("kabu", "kabu", ".json")
     # 要約を作るときだけ読む材料。サイトの表示には使わない。
     copy_per_company("context", "context", ".json")
 
@@ -271,7 +274,7 @@ def main():
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
     secs = load_sections()
     sbuckets = defaultdict(dict)
-    for sec in set(secs) | has_risk | has_bio | has_hist:
+    for sec in set(secs) | has_risk | has_bio | has_hist | has_kabu:
         if sec not in companies:
             continue
         obj = secs.get(sec, {})
@@ -279,6 +282,8 @@ def main():
             obj["r"] = 1
         if sec in has_bio:
             obj["b"] = 1
+        if sec in has_kabu:
+            obj["kb"] = 1
         if sec in has_hist:
             obj["h"] = 1
         sbuckets[bucket_of(sec)][sec] = obj

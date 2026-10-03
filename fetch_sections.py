@@ -47,7 +47,9 @@ BIO_DIR = os.path.join(DATA_DIR, "bios")
 HIST_DIR = os.path.join(DATA_DIR, "history")
 
 # 取得する項目の版。項目を足したらここを変える。版が違う会社は取り直す（記録は消さない）。
-SECTIONS_VERSION = "2026-09-28 沿革・経営方針"
+SECTIONS_VERSION = "2026-10-04 関係会社・新株予約権・自己株式・監査法人"
+# 株式まわり（関係会社・新株予約権・自己株式・監査法人）は会社ごとのファイル。/kabu/{code}.json
+KABU_DIR = os.path.join(DATA_DIR, "kabu")
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")
 SEGMENTS = os.path.join(DATA_DIR, "segments.csv")
 # 要約を書くための材料。事業の内容だけでは仕入や販売先が分からないので、
@@ -414,6 +416,16 @@ def main():
         elif os.path.exists(bpath):
             os.remove(bpath)
 
+        # 株式まわり。有報の要約（提案書ツール）で使う。
+        kabu = parse_kabu(blocks)
+        os.makedirs(KABU_DIR, exist_ok=True)
+        kpath = os.path.join(KABU_DIR, f"{sec}.json")
+        if any(kabu.values()):
+            with open(kpath, "w", encoding="utf-8") as fp:
+                json.dump(kabu, fp, ensure_ascii=False, separators=(",", ":"))
+        elif os.path.exists(kpath):
+            os.remove(kpath)
+
         # 沿革。表の各行から「年月」と「事項」を取り出す。表になっていない会社は本文の行から拾う。
         hist = parse_history(blocks.get("CompanyHistoryTextBlock", ""))
         os.makedirs(HIST_DIR, exist_ok=True)
@@ -446,6 +458,77 @@ def main():
         log(f"■ 残り {remain}社。次回の実行で続きから取得します。")
     if failed:
         log(f"■ 取得できなかった会社: {failed}")
+
+
+NONE = re.compile(r"該当事項は(あり|ござい)ません")
+
+
+def _cells(rows):
+    """表の行を、空でないセルだけ・空白を詰めた形にする。"""
+    out = []
+    for row in rows:
+        cells = [re.sub(r"\s+", " ", unicodedata.normalize("NFKC", c or "")).strip() for c in row]
+        cells = [c for c in cells if c]
+        if cells:
+            out.append(cells)
+    return out
+
+
+def _text(html, limit=1500):
+    t = sections.text_of(html or "")
+    return t[:limit]
+
+
+def parse_kabu(blocks):
+    """関係会社・新株予約権・自己株式・監査法人を取り出す。
+
+    表はセルのまま、文章は先頭だけ。新株予約権は「該当事項はありません」かどうかで有無を決め、
+    有るものは回号（第◯回新株予約権）を数える。監査法人は「監査の状況」の本文から名称を拾う。
+    """
+    g = lambda k: blocks.get(k, "")
+    aff = []
+    for tab in sections.tables_of(g("OverviewOfAffiliatedEntitiesTextBlock")):
+        aff.extend(_cells(tab))
+    rights = {}
+    for key, el in (("so", "DetailsOfEmployeeShareOptionProgramTextBlock"),
+                    ("rights_plan", "DescriptionOfRightsPlanTextBlock"),
+                    ("other", "OtherInformationOnShareAcquisitionRightsTextBlock"),
+                    ("moving", "ExercisesEtcOfMovingStrikeConvertibleBondsEtcTextBlock")):
+        t = _text(g(el), 4000)
+        if not t:
+            continue
+        has = not NONE.search(t)
+        nums = sorted({int(n) for n in re.findall(r"第\s*(\d+)\s*回", unicodedata.normalize("NFKC", t))})
+        rights[key] = {"有": has, "回号": nums[:30], "本文": t[:800] if has else ""}
+    ts = []
+    for tab in sections.tables_of(g("TreasurySharesEtcTextBlock")):
+        ts.extend(_cells(tab))
+    acq = {}
+    for key, el in (("meeting", "AcquisitionsByResolutionOfShareholdersMeetingTextBlock"),
+                    ("board", "AcquisitionsByResolutionOfBoardOfDirectorsMeetingTextBlock"),
+                    ("other", "AcquisitionsNotBasedOnResolutionOfShareholdersMeetingOrBoardOfDirectorsMeetingTextBlock"),
+                    ("disposal", "DisposalsOrHoldingOfAcquiredTreasurySharesTextBlock")):
+        html = g(el)
+        if not html:
+            continue
+        t = _text(html, 1500)
+        rows = []
+        for tab in sections.tables_of(html):
+            rows.extend(_cells(tab))
+        acq[key] = {"有": not NONE.search(t), "表": rows[:40], "本文": t if NONE.search(t) else t[:1500]}
+    audit = {}
+    at = unicodedata.normalize("NFKC", sections.text_of(g("AuditsTextBlock")))
+    m = re.search(r"監査法人の名称\s*[:：]?\s*\n?\s*([^\n]{2,40})", at)
+    name = m.group(1).strip() if m else None
+    if not name:
+        m = re.search(r"((?:有限責任\s*)?[^\s、。()（）「」]{1,25}?(?:有限責任)?監査法人)", at)
+        name = m.group(1).strip() if m else None
+    if name:
+        audit["名称"] = name
+        m = re.search(r"継続監査期間\s*[:：]?\s*\n?\s*([^\n]{1,30})", at)
+        if m:
+            audit["継続監査期間"] = m.group(1).strip()
+    return {"aff": aff[:200], "rights": rights, "ts": ts[:20], "acq": acq, "audit": audit}
 
 
 YM = re.compile(r"(\d{4}|[明大昭平令][治正和成]?\s*\d{1,2}|[明大昭平令][治正和成]?元)\s*年\s*(\d{1,2}\s*月)?")

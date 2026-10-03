@@ -37,6 +37,18 @@ TARGETS = {
     "CompanyHistoryTextBlock": "沿革",
     # 経営方針、経営環境及び対処すべき課題等。有報の要約（提案書ツール）で使う。
     "BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock": "経営方針・対処すべき課題",
+    # 有報の要約（提案書ツール）で使う。要素名はprobeで3社を見てから足した（2026-10-04）。
+    "OverviewOfAffiliatedEntitiesTextBlock": "関係会社の状況",
+    "DetailsOfEmployeeShareOptionProgramTextBlock": "ストックオプション制度の内容",
+    "DescriptionOfRightsPlanTextBlock": "ライツプランの内容",
+    "OtherInformationOnShareAcquisitionRightsTextBlock": "その他の新株予約権等の状況",
+    "ExercisesEtcOfMovingStrikeConvertibleBondsEtcTextBlock": "行使価額修正条項付新株予約権付社債券等の行使状況等",
+    "TreasurySharesEtcTextBlock": "自己株式等",
+    "AcquisitionsByResolutionOfShareholdersMeetingTextBlock": "株主総会決議による取得の状況",
+    "AcquisitionsByResolutionOfBoardOfDirectorsMeetingTextBlock": "取締役会決議による取得の状況",
+    "AcquisitionsNotBasedOnResolutionOfShareholdersMeetingOrBoardOfDirectorsMeetingTextBlock": "決議に基づかない取得",
+    "DisposalsOrHoldingOfAcquiredTreasurySharesTextBlock": "取得自己株式の処理状況及び保有状況",
+    "AuditsTextBlock": "監査の状況",
 }
 
 # 表ではなく文章として読むもの。段落の区切りを残す必要がある。

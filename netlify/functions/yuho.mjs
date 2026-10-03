@@ -115,6 +115,10 @@ export default async (req) => {
     if (error instanceof Anthropic.APIError) return bad(`要約に失敗しました（${error.status}）`, 502);
     throw error;
   }
+  // 本文より前に余計な文字列が混ざることがある。出力は「・」で始まる箇条書きなので、
+  // 最初の「・」より前は捨てる。
+  const dot = summary ? summary.indexOf("・") : -1;
+  summary = dot >= 0 ? summary.slice(dot).trim() : "";
   if (!summary) return bad("要約が空でした", 502);
 
   const record = { code, part, title: P.title, summary, doc, model: MODEL, generatedAt: new Date().toISOString() };

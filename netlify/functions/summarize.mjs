@@ -142,6 +142,10 @@ export default async (req) => {
     throw error;
   }
 
+  // 本文より前に余計な文字列が混ざることがあった（7794）。出力は【見出し】で始まる形なので、
+  // 最初の【より前は捨てる。見出しが1つも無ければ使わない。
+  const head = summary ? summary.indexOf("【") : -1;
+  summary = head >= 0 ? summary.slice(head).trim() : "";
   if (!summary) return badRequest("要約が空でした", 502);
 
   const record = {

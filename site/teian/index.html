@@ -227,7 +227,7 @@ import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
-import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS } from "./gaiyo.js";
+import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
 
 const $ = (id) => document.getElementById(id);
@@ -439,7 +439,8 @@ function renderGaiyo() {
       `<div class="part"><h4>主要な経営指標等の推移</h4>${tbl(kt.head, kt.rows)}
          ${kt.notes.length ? `<p class="note">${kt.notes.map(esc).join(" ")}</p>` : ""}</div>
        <div class="part"><h4>沿革</h4><div id="yh-hist" class="ai wait">${ctx.sec?.h ? "読み込んでいます…" : "沿革はまだ取得していない（全社に行き渡るまで約1週間）"}</div></div>
-       <div class="part"><h4>事業の内容</h4><div class="ai wait" id="yh-biz">要約を作っています…</div></div>`)}
+       <div class="part"><h4>事業の内容</h4><div class="ai wait" id="yh-biz">要約を作っています…</div></div>
+       <div class="part"><h4>関係会社の状況</h4><div class="ai wait" id="yh-aff">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>`)}
     ${ch(2, "事業の状況", TEXT_PARTS.filter((p) => p.chapter === 2).map(partBox).join(""))}
     ${ch(3, "設備の状況", TEXT_PARTS.filter((p) => p.chapter === 3).map(partBox).join(""))}
     ${ch(4, "提出会社の状況",
@@ -448,11 +449,15 @@ function renderGaiyo() {
          st.treasury ? `自己株式 ${st.treasury.toLocaleString("ja-JP")}株` : null,
          st.unit ? `単元 ${st.unit}株` : null,
          st.holdersCount ? `株主数 ${st.holdersCount.toLocaleString("ja-JP")}名` : null].filter(Boolean).map(esc).join("／") + `</p></div>` +
+      `<div class="part"><h4>新株予約権等の状況</h4><div class="ai wait" id="yh-rights">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
+      `<div class="part"><h4>自己株式の保有と取得の状況</h4><div class="ai wait" id="yh-acq">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
       TEXT_PARTS.filter((p) => p.chapter === 4).map(partBox).join("") +
       (st.top.length ? `<div class="part"><h4>大株主の状況（上位10名）</h4>${tbl(["株主名", "区分", "比率"],
         st.top.map((h) => [h.label, h.kind, pctS(h.ratio, 2)]))}</div>` : "") +
       (st.own.length ? `<div class="part"><h4>所有者別状況</h4>${tbl(["区分", "比率"], st.own.map((o) => [o.category, pctS(o.ratio)]))}</div>` : "") +
-      `<div class="part"><h4>役員の状況</h4><p class="ai">${esc([st.reps.join("、"), st.officerCount ? `役員${st.officerCount}名` : ""].filter(Boolean).join("／") || "—")}</p></div>` +
+      `<div class="part"><h4>役員の状況（${st.officerCount}名）</h4>` +
+        (st.officerCount ? tbl(["役職", "氏名", "生年月日", "所有株式数（株）"], officerRows(ctx.sec?.of)) : `<p class="ai">—</p>`) + `</div>` +
+      `<div class="part"><h4>監査法人</h4><div class="ai wait" id="yh-audit">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
       (st.holdings ? `<div class="part"><h4>株式の保有状況</h4><p class="ai">${esc(
         `政策保有株 ${((st.holdings.total || 0) / 1e8).toFixed(1)}億円` + (st.holdings.count !== null ? `（上場${st.holdings.count}銘柄）` : "") +
         (st.holdings.pure ? `／純投資目的の上場株 ${(st.holdings.pure / 1e8).toFixed(1)}億円` : ""))}</p></div>` : ""))}
@@ -492,6 +497,32 @@ async function fillGaiyo(my) {
         if (t) t.onclick = (e) => { e.preventDefault(); $("yh-hist").querySelectorAll("tr.minor").forEach((r) => r.classList.remove("hide")); t.remove(); };
       }
     } catch { put("yh-hist", "沿革を読み込めなかった。"); }
+  }
+  // 株式まわり（関係会社・新株予約権・自己株式・監査法人）
+  if (ctx.sec?.kb) {
+    try {
+      const r = await fetch(DATA ? `${DATA}/kabu/${code}.json` : `/kabu/${code}.json`);
+      const k = r.ok ? await r.json() : null;
+      if (my === gaiyoToken && k) {
+        const set = (id, html) => { const el = $(id); if (el) { el.classList.remove("wait"); el.innerHTML = html; } };
+        // 関係会社：見出し行（連結子会社など1セルの行）は太字、ほかは先頭5列
+        const aff = (k.aff || []).filter((row) => !/^名称$/.test(row[0]));
+        set("yh-aff", aff.length ? `<table>${aff.map((row) => row.length === 1
+          ? `<tr><th colspan="5" style="text-align:left">${esc(row[0])}</th></tr>`
+          : `<tr>${row.slice(0, 5).map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</table>` : "記載なし");
+        set("yh-rights", esc(rightsLine(k.rights) || "記載なし"));
+        const acq = acqLines(k.acq);
+        // 自己株式等の表は、会社によって先頭に日付の行がある。「計」の行から株数と割合を取る。
+        const tot = (k.ts || []).find((row) => /^計$/.test(row[0])) || (k.ts || []).find((row) => /自己保有/.test(row[0]));
+        const tsLine = tot ? `自己株式 ${tot[tot.length - 2] || tot[2]}株（発行済株式の${tot[tot.length - 1]}%）` : null;
+        set("yh-acq",
+          (tsLine ? `<p class="ai">${esc(tsLine)}（期末・自己株式等の状況）</p>` : "") +
+          acq.map((a) => `<p class="ai"><b>${esc(a.head)}</b>：${a.has ? "有" : "該当なし"}` +
+            (a.hold ? `（${esc(a.hold.join(" "))}）` : "") + `</p>` +
+            (a.has && a.rows.length && !a.hold ? tbl(a.rows[0], a.rows.slice(1)) : "")).join("") || "記載なし");
+        set("yh-audit", esc(k.audit?.名称 ? k.audit.名称 + (k.audit.継続監査期間 ? `（継続監査期間 ${k.audit.継続監査期間}）` : "") : "読み取れなかった"));
+      }
+    } catch { /* 下の要約は続ける */ }
   }
   // 事業の内容（既存の要約）。1行目の【全体】は見出しにも出す。
   try {

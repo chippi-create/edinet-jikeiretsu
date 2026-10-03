@@ -48,6 +48,9 @@ export function keyTable(ctx) {
     row("財務CF", money("財務CF")),
     row("現金・現金同等物", money("現金及び現金同等物")),
     row("1株当たり配当（円）", (y) => { const v = get("1株当たり配当", y); return v === null ? "—" : String(v); }),
+    row("PER（倍）", (y) => { const v = get("株価収益率", y); return v === null ? "—" : v.toFixed(1); }),
+    // 株主総利回り（TSR）は「1.678」のように比で入っている。％で出す。
+    row("株主総利回り", (y) => { const v = get("株主総利回り", y); return v === null ? "—" : `${(v * 100).toFixed(1)}%`; }),
     row("従業員数（人）", (y) => fmt(get("従業員数", y))),
   ].filter((r) => r.slice(1).some((c) => c !== "—"));
 
@@ -129,3 +132,48 @@ export const TEXT_PARTS = [
   { chapter: 3, part: "facilities", title: "設備の状況" },
   { chapter: 4, part: "dividend", title: "配当政策" },
 ];
+
+// ---- 株式まわり（/kabu/{code}.json）--------------------------------------
+
+/** 新株予約権の状況を1行に。長くなるので有無と回号だけ（本人の指定）。 */
+export function rightsLine(rights) {
+  if (!rights) return null;
+  const range = (ns) => !ns || !ns.length ? "" : ns.length === 1 ? `第${ns[0]}回`
+    : `第${ns[0]}〜${ns[ns.length - 1]}回`;
+  const one = (label, r) => !r ? null : `${label}：${r.有 ? `有${r.回号?.length ? `（${range(r.回号)}）` : ""}` : "無"}`;
+  return [one("ストックオプション", rights.so), one("その他の新株予約権", rights.other),
+    one("行使価額修正条項付", rights.moving), one("ライツプラン", rights.rights_plan)].filter(Boolean).join("／");
+}
+
+/** 自己株式の取得（決議・取得・処理と保有）を数行に。 */
+export function acqLines(acq) {
+  if (!acq) return [];
+  const out = [];
+  const lab = { meeting: "株主総会決議による取得", board: "取締役会決議による取得",
+    other: "決議に基づかない取得（単元未満株の買取りなど）" };
+  for (const k of ["board", "meeting", "other"]) {
+    const a = acq[k];
+    if (!a) continue;
+    out.push({ head: lab[k], has: a.有, rows: a.有 ? (a.表 || []).slice(0, 8) : [] });
+  }
+  const d = acq.disposal;
+  if (d) {
+    // 処理状況及び保有状況の表から「保有自己株式数」の行を探す
+    const hold = (d.表 || []).find((r) => /保有自己株式数/.test(r[0] || ""));
+    out.push({ head: "取得自己株式の処理状況及び保有状況", has: d.有, rows: (d.表 || []).slice(0, 10), hold });
+  }
+  return out;
+}
+
+/** 役員の状況。個人名には様。 */
+export function officerRows(of) {
+  return (of || []).map((r) => {
+    const role = String(r[0] || "").replace(/\s+/g, " ").trim();
+    const name = String(r[1] || "").replace(/\s*注\s*\d+/g, "").trim();
+    const born = String(r[2] || "").trim();
+    const sh = num(r[4]);
+    const unit = String(r[5] || "");
+    const mult = unit.includes("千") ? 1000 : unit.includes("百") ? 100 : 1;
+    return [role, holderLabel(name, "個人"), born, sh === null ? "—" : (sh * mult).toLocaleString("ja-JP")];
+  });
+}

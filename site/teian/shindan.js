@@ -462,46 +462,6 @@ export function diagnose(ctx, pf = profile(ctx)) {
   return out.sort((p, q) => q.score - p.score);
 }
 
-// ---- 推定オーナー比率 ----------------------------------------------------
-
-/**
- * 創業家などオーナー側の持ち分を、名前と区分から推定する。
- *   上位10名の個人 ＋ 資産管理会社・親会社らしい法人（looksLikeOwner）＋ 上位10名に入っていない役員の持株
- * 持株会・信託口・証券会社・銀行・保険は入れない。親族関係や資産管理会社かどうかは名前だけでは確定できないので、
- * 何を入れたかを全部返して、確かめられるようにする。比率の分母は大株主の表と同じ（自己株式を除く発行済株式数）。
- *   { ratio, parts:[{label, kind, ratio, why}], officers:{ratio, count}|null }
- */
-export function ownerEstimate(shRows, ofRows, basis = {}) {
-  const sh = holders(shRows).slice(0, 10);
-  const parts = [];
-  for (const h of sh) {
-    if (h.ratio === null) continue;
-    if (h.kind === "個人") parts.push({ label: h.label, kind: h.kind, ratio: h.ratio, why: "個人の大株主" });
-    else if (looksLikeOwner(h)) {
-      parts.push({ label: h.label, kind: h.kind, ratio: h.ratio,
-        why: h.ratio >= 0.5 ? "親会社か" : "資産管理会社・親会社などか" });
-    }
-  }
-  // 上位10名に入っていない役員の持株（名前で重なりを落とす）
-  let officers = null;
-  const base = basis.issued ? basis.issued - (basis.treasury || 0) : null;
-  if (ofRows && base > 0) {
-    const inTop = new Set(sh.map((h) => normName(h.name)));
-    const unit = (u) => (u || "").includes("千") ? 1000 : (u || "").includes("百") ? 100 : 1;
-    let total = 0, count = 0;
-    for (const r of ofRows) {
-      const name = normName(String(r[1] || "").replace(/\s*注\s*\d+/g, ""));
-      const v = num(r[4]);
-      if (!name || v === null || v <= 0 || inTop.has(name)) continue;
-      total += v * unit(r[5]);
-      count++;
-    }
-    if (count) officers = { ratio: total / base, count };
-  }
-  const ratio = parts.reduce((a, p) => a + p.ratio, 0) + (officers?.ratio || 0);
-  return { ratio, parts, officers };
-}
-
 /** 画面に出す要約の数字。 */
 export function keyFacts(pf) {
   return [

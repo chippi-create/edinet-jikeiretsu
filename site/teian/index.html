@@ -153,11 +153,6 @@
   </div>
   <p class="note">下限行使価額と権利行使期間は会社との個別交渉で決まるので、既定値は置いていません。入れた場合だけ計算します。</p>
   <div class="row" style="margin-top:10px">
-    <div><label for="pricecsv">株価データ（CSV・日付と終値）</label><input id="pricecsv" type="file" accept=".csv,.txt,text/csv"></div>
-    <div><label for="indexcsv">指数データ（任意・TOPIXなど）</label><input id="indexcsv" type="file" accept=".csv,.txt,text/csv"></div>
-  </div>
-  <p class="note" id="pricemsg">「株価の状況」の株価の一文（堅調／軟調／上値が重い）に使います。直近3ヶ月の動きで判定し、判定に使った数字は注記に出ます。</p>
-  <div class="row" style="margin-top:10px">
     <div><label for="months">事業に要る手元資金（月商の何ヶ月）</label><input id="months" class="short" value="1.5" inputmode="decimal"></div>
     <div><label for="capex">年間の投資額（百万円）</label><input id="capex" class="short" inputmode="numeric" placeholder="中計から"></div>
     <div><label for="growth">売上の伸び（%）</label><input id="growth" class="short" inputmode="decimal" placeholder="過去5年平均"></div>
@@ -234,8 +229,6 @@ import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
-import { currentTerm } from "./genjo.js";
-import { decodeCsv, parsePrices, trendOf } from "./kabuka.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -252,8 +245,6 @@ const dURL = (b) => DATA ? `${DATA}/d${b}.json` : `/d/${b}.json`;
 const sURL = (b) => DATA ? `${DATA}/s${b}.json` : `/s/${b}.json`;
 
 let ctx = null, shList = [], pages = null, irDocs = [];
-// アップロードされた株価・指数（会社を読み込み直したら捨てる。別の会社の株価が残らないように）
-let prices = null, indexPrices = null;
 
 /**
  * 一度うまくいったIRページのURLを、この端末に覚えておく。
@@ -286,7 +277,6 @@ const memo = {
  */
 function clearAll() {
   ctx = null; shList = []; pages = null; irDocs = [];
-  prices = null; indexPrices = null; $("pricecsv").value = ""; $("indexcsv").value = "";
   for (const id of ["price", "asof", "dil", "floor", "years",
                     "capex", "growth", "material", "irurl", "pdfurl",
                     "seg", "ckyear", "cksales", "ckop", "ckroe", "exr"]) $(id).value = "";
@@ -514,8 +504,8 @@ async function fillGaiyo(my) {
   // 所有者別・大株主の推移。2期以上の記録がある会社だけ、期を横に並べた表に差し替える。
   if (ctx.sec?.oh) {
     try {
-      const raw = await loadOwnHist(code);
-      const oh = ownerHistory(raw);
+      const r = await fetch(DATA ? `${DATA}/oh/${code}.json` : `/oh/${code}.json`);
+      const oh = ownerHistory(r.ok ? await r.json() : null);
       if (my === gaiyoToken && oh) {
         const pt = (v) => v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "△" : "±"}${Math.abs(v * 100).toFixed(2)}`;
         const span = `${oh.heads[oh.heads.length - 1]}→${oh.heads[0]}`;
@@ -584,8 +574,6 @@ async function fillGaiyo(my) {
 function readInputs() {
   ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {},
                  segment: $("seg").value };
-  ctx.prices = prices;
-  ctx.indexPrices = indexPrices;
   ctx.chukei = {
     year: $("ckyear").value.trim(),
     sales: n($("cksales").value) || null,
@@ -646,7 +634,7 @@ $("slabel").addEventListener("input", recalcStable);
 $("load").onclick = load;
 $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 
-$("go").onclick = async () => {
+$("go").onclick = () => {
   if (!ctx) return;
   readInputs();
   renderShindan();
@@ -666,13 +654,6 @@ $("go").onclick = async () => {
   // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
   // 入口ごとに呼ぶと漏れるので、組み立てる直前に必ず読み直す。
   readTanshin(true);
-  await loadOwnHist(ctx.code);
-  // 「事業の状況」の四半期と今期予想は短信から入る。まだ読み込んでいなければ、ここで1回だけIRから取る。
-  if (needTanshin()) {
-    $("go").disabled = true;
-    try { await autoTanshin(); } finally { $("go").disabled = false; }
-    readTanshin(true);
-  }
   pages = buildProposal(ctx);
   render();
   // 資料は入っているのに下書きをしていないと、文章に反映されない。
@@ -707,8 +688,7 @@ function blocksHTML(blocks, depth = 0) {
 function tableHTML(t) {
   const cell = (c, i) => `<td class="${/^[\d,\.%\-—円株倍]+$/.test(c) ? "n" : ""}">${markTodo(c)}</td>`;
   return (t.caption ? `<div class="cap">${esc(t.caption)}</div>` : "") +
-    `<table>` + (t.groups ? `<tr>${t.groups.map((g) => `<th colspan="${g.span}" style="text-align:center">${esc(g.text)}</th>`).join("")}</tr>` : "") +
-    `<tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+    `<table><tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
     t.rows.map((r, i) => `<tr class="${t.pick === i ? "pick" : ""}">${r.map(cell).join("")}</tr>`).join("") +
     (t.foot ? `<tr>${t.foot.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` : "") +
     `</table>` + (t.note ? `<p class="note">${esc(t.note)}</p>` : "");
@@ -886,76 +866,6 @@ ${j.text}`);
   $("irload").disabled = false;
 }
 
-/** 所有者別・大株主の期ごとの記録（2回以上ある会社だけ配っている）。株主構成のページでも使うので ctx に持つ。 */
-async function loadOwnHist(code) {
-  if (!ctx?.sec?.oh) return null;
-  if (ctx.ownHist && ctx.ownHistCode === code) return ctx.ownHist;
-  try {
-    const r = await fetch(DATA ? `${DATA}/oh/${code}.json` : `/oh/${code}.json`);
-    const j = r.ok ? await r.json() : null;
-    if (ctx && ctx.code === code) { ctx.ownHist = j; ctx.ownHistCode = code; }
-    return j;
-  } catch { return null; }
-}
-
-/** 有報の直近期の翌期（＝今期）の短信が、資料の欄にまだ無いか。 */
-function needTanshin() {
-  if (!ctx || ctx.irAutoDone) return false;
-  const ys = Object.keys(ctx.fin?.["売上高"] || ctx.fin?.["純利益"] || {}).sort();
-  const lastY = Number(ys[ys.length - 1]);
-  const cur = currentTerm(ctx.tanshinAll);
-  return !!lastY && !(cur && cur.fy === lastY + 1);
-}
-
-/**
- * 今期の決算短信（通期の短信と各四半期）をIRから探して読み込む。提案書を作るときに1回だけ。
- * 有報の直近期末より後に出た短信を新しい順に4本まで。中期経営計画も1本あれば一緒に入れる（文章の材料）。
- */
-async function autoTanshin() {
-  ctx.irAutoDone = true;
-  const el = $("gomsg");
-  const ys = Object.keys(ctx.fin?.["売上高"] || ctx.fin?.["純利益"] || {}).sort();
-  const km = String(ctx.kessan || "").replace(/[^\d]/g, "").padStart(2, "0");
-  const since = `${ys[ys.length - 1]}-${km}-01`;
-  el.textContent = "今期の決算短信をIRから探しています（10秒ほど）…";
-  try {
-    const res = await fetch(`${API}/api/ir`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "find", code: ctx.code, url: $("irurl").value.trim() || undefined }),
-    });
-    const j = await res.json();
-    if (!res.ok) { el.textContent = "IRから短信を取れなかった。「IR資料を探す」から読み込める。"; return; }
-    const have = $("material").value;
-    const docs = j.docs || [];
-    const pick = [
-      ...docs.filter((d) => d.kind === "決算短信" && (d.date || "") >= since)
-        .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 4),
-      ...(/中期経営計画/.test(have) ? [] : docs.filter((d) => d.kind === "中期経営計画").slice(0, 1)),
-    ].filter((d) => !have.includes(d.title));
-    if (!pick.length) { el.textContent = "今期の決算短信がIRに見つからなかった。"; return; }
-    const parts = [];
-    for (let i = 0; i < pick.length; i++) {
-      const d = pick[i];
-      el.textContent = `IR資料を読み込んでいます… ${i + 1}/${pick.length}`;
-      try {
-        const r = await fetch(`${API}/api/ir`, {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ mode: "text", url: d.url }),
-        });
-        const t = await r.json();
-        if (r.ok) parts.push(`=== ${d.title}（${d.date || "日付なし"}） ===
-${t.text}`);
-      } catch { /* 次の資料へ */ }
-    }
-    if (parts.length) {
-      $("material").value = (have.trim() ? have.trim() + "\n\n" : "") + parts.join("\n\n");
-      el.textContent = `IRから${parts.length}本を読み込みました。`;
-    }
-  } catch {
-    el.textContent = "IRにつながらなかった。「IR資料を探す」から読み込める。";
-  }
-}
-
 /**
  * 貼られた資料から、決算短信の数字を読み取る。
  *
@@ -978,22 +888,6 @@ function readTanshin(quiet) {
 }
 $("material").addEventListener("change", () => readTanshin(false));
 
-// 株価・指数のCSV。読めた範囲と判定をその場で出す。
-async function readPriceFile(input, isIndex) {
-  const f = input.files?.[0];
-  if (!f) { if (isIndex) indexPrices = null; else prices = null; return; }
-  const list = parsePrices(decodeCsv(await f.arrayBuffer()));
-  if (isIndex) indexPrices = list.length ? list : null; else prices = list.length ? list : null;
-  const el = $("pricemsg");
-  if (!list.length) { el.textContent = `${f.name}：日付と終値の列を読めませんでした。`; return; }
-  const tr = prices ? trendOf(prices, indexPrices) : null;
-  el.textContent = `${isIndex ? "指数" : "株価"}：${list[0].date}〜${list[list.length - 1].date}（${list.length}日）を読みました。` +
-    (tr ? ` 判定：${tr.verdict}（${tr.note.replace(/^株価の判定：/, "").split("。")[0]}）` : prices ? " 3ヶ月分以上あると判定します。" : "");
-  if (pages) $("go").click();
-}
-$("pricecsv").addEventListener("change", (e) => readPriceFile(e.target, false));
-$("indexcsv").addEventListener("change", (e) => readPriceFile(e.target, true));
-
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。
 // 会社の開示内容はサーバー側が自分で読むので、こちらからは送らない。
@@ -1004,7 +898,6 @@ const SLOT_LABEL = {
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
-  prevDriver: "株価の状況：前期の業績の要因", outlookDriver: "株価の状況：今期予想の背景", recentDriver: "株価の状況：足元の利益の要因",
   growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）", storySlogan: "エクイティストーリー：目指す姿", growthArea: "主な経営指標：成長性のある領域",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
@@ -1018,22 +911,15 @@ const SLOT_GROUPS = [
   // サマリーの＜事業の状況＞①（何で伸びたか）は2〜3文なので、1文の2つと組む。
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
   ["bizDriver", "stockView", "growthView", "bizDriverShort", "growthArea"],
-  ["story", "useOfFunds", "whyMethod", "costCut", "prevDriver"],         // 各3点。14秒（＋短い1つ）
-  ["segExisting", "segNew", "useShort", "storySlogan", "recentDriver"],    // 長文。ここが重い（＋短い1つ）
+  ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
+  ["segExisting", "segNew", "useShort", "storySlogan"],                    // 長文。ここが重い
   // ＜事業の状況＞②（中計の方向性）。
-  ["points", "chukeiFocus", "chukeiShort", "investKpi", "outlookDriver"],
+  ["points", "chukeiFocus", "chukeiShort", "investKpi"],
 ];
 
 $("ai").onclick = async () => {
   if (!ctx) { alert("先に会社を読み込んでください"); return; }
   $("ai").disabled = true;
-  // 今期予想の背景・足元の要因は短信を読んで書かせるので、先に今期の短信を入れておく。
-  readTanshin(true);
-  if (needTanshin()) {
-    $("aimsg").textContent = "今期の決算短信をIRから読み込んでいます…";
-    await autoTanshin();
-    readTanshin(true);
-  }
   $("aimsg").textContent = "下書きを作っています（1分ほどかかります）…";
   const material = $("material").value.slice(0, 60000);
   const refresh = $("refresh").checked;

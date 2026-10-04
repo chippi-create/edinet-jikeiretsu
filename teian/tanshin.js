@@ -80,7 +80,7 @@ export function parseTanshin(text) {
     company: null, code: null, period: null, quarter: null,
     announced: null, forecast: null, halfForecast: null, actual: null, prior: null,
     equityRatio: null, dividendForecast: null, source: "決算短信",
-    eps: null, epsForecast: null, totalAssets: null, netAssets: null, equity: null, bs: null, cf: null,
+    eps: null, epsForecast: null, revised: null, totalAssets: null, netAssets: null, equity: null, bs: null, cf: null,
   };
 
   // 表紙。「2027年4月期 第1四半期決算短信」と提出日。
@@ -182,6 +182,10 @@ export function parseTanshin(text) {
     const ref = /\(参考\)\s*自己資本\s*\d{4}年\s*\d{1,2}月期\s*(第\d四半期|中間期)?\s*([△▲\-]?[\d,]+)\s*百万円/.exec(norm(text));
     if (ref) out.equity = toNum(ref[2]);
   }
+
+  // 業績予想の修正の有無（配当予想の修正の有無とは別の行）。
+  const rv = /業績予想からの修正の有無\s*[:：]\s*(有|無)/.exec(flat);
+  if (rv) out.revised = rv[1] === "有";
 
   // 年間配当の予想。「2027年4月期(予想) 0.00 - 10.00 10.00」の最後の数字（合計）。
   const dv = lines.find((l) => /^\s*\d{4}年\s*\d{1,2}月期\s*\(予想\)/.test(norm(l)));

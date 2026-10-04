@@ -153,6 +153,11 @@
   </div>
   <p class="note">下限行使価額と権利行使期間は会社との個別交渉で決まるので、既定値は置いていません。入れた場合だけ計算します。</p>
   <div class="row" style="margin-top:10px">
+    <div><label for="pricecsv">株価データ（CSV・日付と終値）</label><input id="pricecsv" type="file" accept=".csv,.txt,text/csv"></div>
+    <div><label for="indexcsv">指数データ（任意・TOPIXなど）</label><input id="indexcsv" type="file" accept=".csv,.txt,text/csv"></div>
+  </div>
+  <p class="note" id="pricemsg">「株価の状況」の株価の一文（堅調／軟調／上値が重い）に使います。直近3ヶ月の動きで判定し、判定に使った数字は注記に出ます。</p>
+  <div class="row" style="margin-top:10px">
     <div><label for="months">事業に要る手元資金（月商の何ヶ月）</label><input id="months" class="short" value="1.5" inputmode="decimal"></div>
     <div><label for="capex">年間の投資額（百万円）</label><input id="capex" class="short" inputmode="numeric" placeholder="中計から"></div>
     <div><label for="growth">売上の伸び（%）</label><input id="growth" class="short" inputmode="decimal" placeholder="過去5年平均"></div>
@@ -230,6 +235,7 @@ import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
 import { currentTerm } from "./genjo.js";
+import { decodeCsv, parsePrices, trendOf } from "./kabuka.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -246,6 +252,8 @@ const dURL = (b) => DATA ? `${DATA}/d${b}.json` : `/d/${b}.json`;
 const sURL = (b) => DATA ? `${DATA}/s${b}.json` : `/s/${b}.json`;
 
 let ctx = null, shList = [], pages = null, irDocs = [];
+// アップロードされた株価・指数（会社を読み込み直したら捨てる。別の会社の株価が残らないように）
+let prices = null, indexPrices = null;
 
 /**
  * 一度うまくいったIRページのURLを、この端末に覚えておく。
@@ -278,6 +286,7 @@ const memo = {
  */
 function clearAll() {
   ctx = null; shList = []; pages = null; irDocs = [];
+  prices = null; indexPrices = null; $("pricecsv").value = ""; $("indexcsv").value = "";
   for (const id of ["price", "asof", "dil", "floor", "years",
                     "capex", "growth", "material", "irurl", "pdfurl",
                     "seg", "ckyear", "cksales", "ckop", "ckroe", "exr"]) $(id).value = "";
@@ -575,6 +584,8 @@ async function fillGaiyo(my) {
 function readInputs() {
   ctx.market = { price: n($("price").value) || null, asOf: $("asof").value, volumes: {},
                  segment: $("seg").value };
+  ctx.prices = prices;
+  ctx.indexPrices = indexPrices;
   ctx.chukei = {
     year: $("ckyear").value.trim(),
     sales: n($("cksales").value) || null,
@@ -954,6 +965,22 @@ function readTanshin(quiet) {
 }
 $("material").addEventListener("change", () => readTanshin(false));
 
+// 株価・指数のCSV。読めた範囲と判定をその場で出す。
+async function readPriceFile(input, isIndex) {
+  const f = input.files?.[0];
+  if (!f) { if (isIndex) indexPrices = null; else prices = null; return; }
+  const list = parsePrices(decodeCsv(await f.arrayBuffer()));
+  if (isIndex) indexPrices = list.length ? list : null; else prices = list.length ? list : null;
+  const el = $("pricemsg");
+  if (!list.length) { el.textContent = `${f.name}：日付と終値の列を読めませんでした。`; return; }
+  const tr = prices ? trendOf(prices, indexPrices) : null;
+  el.textContent = `${isIndex ? "指数" : "株価"}：${list[0].date}〜${list[list.length - 1].date}（${list.length}日）を読みました。` +
+    (tr ? ` 判定：${tr.verdict}（${tr.note.replace(/^株価の判定：/, "").split("。")[0]}）` : prices ? " 3ヶ月分以上あると判定します。" : "");
+  if (pages) $("go").click();
+}
+$("pricecsv").addEventListener("change", (e) => readPriceFile(e.target, false));
+$("indexcsv").addEventListener("change", (e) => readPriceFile(e.target, true));
+
 // ---- AIの下書き ----------------------------------------------------------
 // 送るのは証券コードと、手元で貼った公表済み資料だけ。
 // 会社の開示内容はサーバー側が自分で読むので、こちらからは送らない。
@@ -964,6 +991,7 @@ const SLOT_LABEL = {
   bizDriverShort: "業績の増減要因（短く・提案書用）", chukeiShort: "中計の方向性（短く・提案書用）",
   costCut: "バックアッププラン：コスト削減・効率化", investKpi: "バックアッププラン：投資と成果の管理",
   stockView: "株価の状況の結論",
+  prevDriver: "株価の状況：前期の業績の要因", outlookDriver: "株価の状況：今期予想の背景", recentDriver: "株価の状況：足元の利益の要因",
   growthView: "財務と投資計画の方向性", story: "資本政策の背景", useShort: "資金使途（短く・提案書用）", storySlogan: "エクイティストーリー：目指す姿", growthArea: "主な経営指標：成長性のある領域",
   useOfFunds: "資金使途の候補", segExisting: "既存事業領域",
   segNew: "新規事業領域", points: "資本政策を検討する背景",
@@ -977,10 +1005,10 @@ const SLOT_GROUPS = [
   // サマリーの＜事業の状況＞①（何で伸びたか）は2〜3文なので、1文の2つと組む。
   // 短い版（提案書のサマリー用）は25字なので、同じ組に入れても時間は伸びにくい。
   ["bizDriver", "stockView", "growthView", "bizDriverShort", "growthArea"],
-  ["story", "useOfFunds", "whyMethod", "costCut"],         // 各3点。14秒
-  ["segExisting", "segNew", "useShort", "storySlogan"],                    // 長文。ここが重い
+  ["story", "useOfFunds", "whyMethod", "costCut", "prevDriver"],         // 各3点。14秒（＋短い1つ）
+  ["segExisting", "segNew", "useShort", "storySlogan", "recentDriver"],    // 長文。ここが重い（＋短い1つ）
   // ＜事業の状況＞②（中計の方向性）。
-  ["points", "chukeiFocus", "chukeiShort", "investKpi"],
+  ["points", "chukeiFocus", "chukeiShort", "investKpi", "outlookDriver"],
 ];
 
 $("ai").onclick = async () => {

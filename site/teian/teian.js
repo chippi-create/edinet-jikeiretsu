@@ -10,7 +10,8 @@ import {
   maxDilutionFor, dilutedRatio, checkBasis,
 } from "./sim.js";
 import { analyze, segUnit } from "./shikin.js";
-import { buildGenjo } from "./genjo.js";
+import { buildGenjo, currentTerm, progress } from "./genjo.js";
+import { trendOf } from "./kabuka.js";
 import { jigyoMid } from "./jigyo.js";
 import { holderLabel } from "./shindan.js";
 import { pageBackup } from "./backup.js";
@@ -586,73 +587,128 @@ function pageRunway(ctx, a, y, x) {
 }
 
 // --- p.6 株価の状況 --------------------------------------------------------
+//
+// 株価そのもの（チャート・指標）は本人が端末で用意するので、ここでは作らない。
+// 左に業績の文章（前期の業績と要因 → 今期の見通し → 足元の状況 → 株価）、右に3期の業績表。
+// 増収増益・進捗・予想の修正・株価の判定は数字から機械で出し、要因の言葉だけ下書き（AI）を使う。
+
+/** 「増収増益」「増収・営業黒字転換」など。営業利益が無ければ経常利益で見る。 */
+export function plVerdict(s1, s0, p1, p0, plabel = "営業") {
+  const sales = s1 !== null && s0 !== null && s0 > 0 ? (s1 >= s0 ? "増収" : "減収") : null;
+  let prof = null;
+  if (p1 !== null && p0 !== null) {
+    if (p0 > 0 && p1 > 0) prof = p1 >= p0 ? "増益" : "減益";
+    else if (p0 <= 0 && p1 > 0) prof = `${plabel}黒字転換`;
+    else if (p0 > 0 && p1 <= 0) prof = `${plabel}赤字転落`;
+    else prof = p1 >= p0 ? `${plabel}損失縮小` : `${plabel}損失拡大`;
+  }
+  if (sales && prof) return /益$/.test(prof) ? sales + prof : `${sales}・${prof}`;
+  return sales || prof;
+}
+
+function stockStory(ctx, years) {
+  const { fin } = ctx;
+  const get = (k, y) => num(fin[k]?.[y]);
+  const km = (ctx.kessan || "").replace(/^0/, "");
+  const lastY = years[years.length - 1], prevY = years[years.length - 2];
+  const items = [];
+
+  // ① 前期：「2025年12月期通期は、◯◯により、増収増益となった。」
+  if (lastY && prevY) {
+    const useOp = get("営業利益", lastY) !== null && get("営業利益", prevY) !== null;
+    const k = useOp ? "営業利益" : "経常利益";
+    const v = plVerdict(get("売上高", lastY), get("売上高", prevY), get(k, lastY), get(k, prevY), useOp ? "営業" : "経常");
+    if (v) items.push(`${lastY}年${km}通期は、${D(ctx, "prevDriver", "前期の増減要因")}により、${v}となった。`);
+  }
+
+  // ② 今期：「今期は、◯◯を背景に、増収増益を見込んでいる。」
+  const cur = currentTerm(ctx.tanshinAll?.length ? ctx.tanshinAll : (ctx.tanshin ? [ctx.tanshin] : []));
+  const term = cur && lastY && cur.fy === Number(lastY) + 1 ? cur : null;
+  const f = term?.forecast?.forecast;
+  if (f) {
+    const s0 = get("売上高", lastY), o0 = get("営業利益", lastY);
+    const v = plVerdict(f.売上高 * 1e6, s0, o0 === null ? null : f.営業利益 * 1e6, o0);
+    items.push(`今期は、${D(ctx, "outlookDriver", "今期予想の前提・背景")}を背景に、${v || "【増収増益など】"}を見込んでいる。`);
+  } else {
+    items.push(TODO("今期の業績予想（決算短信の読み込みで入る。予想を開示していない会社はその旨）"));
+  }
+
+  // ③ 足元：前年同期の進捗率と比べる（genjo.js progress）。
+  const q = term?.quarters?.[term.quarters.length - 1]?.t || null;
+  const pg = q ? progress(q, fin) : null;
+  if (pg) {
+    const s = pg.rows.find((r) => r.item === "売上高"), o = pg.rows.find((r) => r.item === "営業利益");
+    const word = { 前年より先行: "前年を上回るペースで推移している", 前年並み: "前年並みのペースで推移している",
+      前年より遅れ: "前年を下回るペースで推移している" };
+    const top = s?.verdict ? `トップラインは${word[s.verdict]}` : null;
+    let op = null;
+    if (o?.verdict) {
+      op = `営業利益は${{ 前年より先行: "前年を上回る進捗", 前年並み: "前年並みの進捗", 前年より遅れ: "進捗が遅れている" }[o.verdict]}`;
+      if (o.verdict === "前年より先行") op = "営業利益も前年を上回る進捗となっている";
+    } else if (o && o.cur !== null && o.prior !== null) {
+      // 赤字を含むと進捗率は測れない。前年同期の累計と比べる。
+      op = o.cur > 0 && o.prior <= 0 ? "営業損益は前年同期の赤字から黒字に転じている"
+        : o.cur <= 0 ? `営業損益は赤字で、前年同期から損失が${o.cur >= o.prior ? "縮小" : "拡大"}している`
+        : `営業利益は前年同期を${o.cur >= o.prior ? "上回っている" : "下回っている"}`;
+    }
+    const bad = (x) => /遅れ|下回|拡大/.test(x || "");
+    const reason = op && bad(op) && !bad(top) ? `${D(ctx, "recentDriver", "足元の利益の要因")}を受け、` : "";
+    // 向きが逆なら「〜ものの、」、同じなら「〜しており、」でつなぐ。
+    const join = top && op ? (bad(top) !== bad(op) ? `${top}ものの、${reason}${op}`
+      : `${top.replace(/している$/, "しており")}、${op}`) : (top || op);
+    let rev = "";
+    if (q.revised === false) rev = (bad(top) || bad(op)) ? "ただし通期見通しは変更していない。" : "通期見通しは据え置いている。";
+    else if (q.revised === true) rev = `通期見通しを修正している（${TODO("上方・下方")}）。`;
+    if (join) items.push(`足元${pg.label.replace(/^\d{4}年\d{1,2}月期/, "")}までの業績は、${join}。${rev}`);
+  } else if (q) {
+    items.push(`足元${q.actual?.期 || ""}までの業績は、${TODO("前年同期との比較")}。`);
+  } else {
+    items.push(TODO("足元の四半期の業績（決算短信の読み込みで入る）"));
+  }
+
+  // ④ 株価：アップロードされた株価データから判定（kabuka.js）
+  const tr = ctx.prices?.length ? trendOf(ctx.prices, ctx.indexPrices) : null;
+  items.push(tr ? `株価はこれらを受け、${tr.phrase}。` : TODO("株価の動き（株価データをアップロードすると入る）"));
+  return { items, trend: tr };
+}
 
 function pageStock(ctx) {
-  const { fin, ext, market, basis } = ctx;
-  // 決算短信から拾えた通期予想。有報には載らないので、ここでしか埋まらない。
-  const fc = ctx.tanshin?.forecast ? ctx.tanshin : null;
-  const years = yearsOf(fin);
+  const { fin, ext } = ctx;
+  const years = yearsOf(fin, 3);
   const row = (label, key, src) => [
     label, ...years.map((y) => {
       const v = num((src || fin)[key]?.[y]);
       return v === null ? "—" : fmt(mm(v));
     }),
   ];
-
-  const sales = series(fin["売上高"], 2);
-  const items = [];
-  if (fc && fc.actual) {
-    items.push(`${fc.actual.期}は売上高${fmt(fc.actual.売上高)}百万円、` +
-      `営業${fc.actual.営業利益 < 0 ? "損失" : "利益"}` +
-      `${fmt(Math.abs(fc.actual.営業利益))}百万円` +
-      `（${fc.announced || ""}公表の決算短信）。`);
-  }
-  if (sales.length === 2) {
-    const t = trend(sales[1][1], sales[0][1], "増収", "減収");
-    items.push(`直近期は${t}。` + TODO("その理由を1行"));
-  }
-  items.push(TODO("株価が動いた出来事（決算発表・業績修正・テーマ化・役員異動など）を2〜3点"));
-
-  const cap = market?.price && basis.issued
-    ? marketCap(market.price, basis.issued) : null;
-
+  const story = stockStory(ctx, years);
+  const tr = story.trend;
   return {
     no: 6,
     title: "株価の状況",
-    lead: D(ctx, "stockView", "株価についての結論を一文で"),
-    blocks: [{ items }],
+    lead: tr ? { 堅調: "株価は堅調に推移", 軟調: "株価は軟調に推移", 上値が重い: "株価は足元で上値が重い展開",
+      横ばい: "株価は横ばい圏で推移" }[tr.verdict] : D(ctx, "stockView", "株価についての結論を一文で"),
+    blocks: [{ items: story.items }],
     tables: [
       {
-        caption: `【通期】（百万円）`,
-        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace("月期", "")}`),
-               ...(fc ? [`${fc.period}予想`] : [])],
+        caption: "業績の推移（百万円）",
+        head: ["決算期", ...years.map((y) => `${y}/${(ctx.kessan || "").replace(/^0/, "").replace("月期", "")}`)],
         rows: [
-          [...row("売上高", "売上高"), ...(fc ? [fmt(fc.forecast.売上高)] : [])],
-          [...row("営業利益", "営業利益"), ...(fc ? [fmt(fc.forecast.営業利益)] : [])],
-          [...row("経常利益", "経常利益"), ...(fc ? [fmt(fc.forecast.経常利益)] : [])],
-          [...row("純利益", "純利益"), ...(fc ? [fmt(fc.forecast.純利益)] : [])],
-          ["配当", ...years.map((y) => {
+          row("売上高", "売上高"),
+          row("営業利益", "営業利益"),
+          row("経常利益", "経常利益"),
+          row("当期純利益", "純利益"),
+          ["1株当たり配当（円）", ...years.map((y) => {
             const v = num(ext["1株当たり配当"]?.[y]);
             return v === null ? "—" : String(v);
-          }), ...(fc ? [TODO("配当予想")] : [])],
-          ["発表日", ...years.map(() => TODO("発表日")),
-           ...(fc ? [fc.announced || TODO("発表日")] : [])],
-        ],
-      },
-      {
-        caption: "株価指標",
-        head: ["項目", "値"],
-        rows: [
-          ["株価", market?.price ? `${fmt(market.price)}円` : TODO("株価")],
-          ["時価総額", cap ? `${oku(cap)}億円` : TODO("時価総額")],
-          ["PER", latest(ext["株価収益率"]) !== null
-            ? `${latest(ext["株価収益率"])}倍（有報の期末時点）` : TODO("PER")],
-          ["PBR", TODO("PBR")],
-          ["1日の出来高平均（3ヶ月）", TODO("出来高")],
+          })],
         ],
       },
     ],
-    notes: ["株価チャートと売買高のグラフは、会社の端末で作成したものを貼る。"],
+    notes: [
+      "出典：有価証券報告書、決算短信。株価チャートは会社の端末で作成したものを貼る。",
+      ...(tr ? [tr.note] : []),
+    ],
   };
 }
 

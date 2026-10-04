@@ -164,7 +164,8 @@ function yearCol(get, y) {
     sales: m("売上高"), op: m("営業利益"), ord: m("経常利益"), net: m("純利益"), dps: get("1株当たり配当", y),
     salesG: growthOf(get("売上高", y), get("売上高", prev)), opG: growthOf(get("営業利益", y), get("営業利益", prev)),
     ca: m("流動資産"), fa: m("固定資産"), cash: m("現金及び現金同等物"), ta: mm(ta),
-    cl: m("流動負債"), fl: mm(fl), debt: mm(sumOf(DEBT.map((k) => get(k, y)))),
+    // 借入の科目が1つも無く、BSの区分は取れている年は、借入なし（0）とみなす。
+    cl: m("流動負債"), fl: mm(fl), debt: mm(sumOf(DEBT.map((k) => get(k, y))) ?? (get("流動負債", y) !== null ? 0 : null)),
     na: m("純資産"), cap: m("資本金"), eq: ta !== null && eqr !== null ? mm(ta * eqr) : null, eqr,
     ocf: mm(ocf), icf: mm(icf), fcf0: m("財務CF"), fcf: ocf !== null && icf !== null ? mm(ocf + icf) : null,
     eps, bps, per, pbr: price && bps > 0 ? price / bps : null,
@@ -180,7 +181,7 @@ function quarterCol(t) {
     salesG: growthOf(a.売上高, p.売上高), opG: growthOf(a.営業利益, p.営業利益),
     ca: bs.流動資産 ?? null, fa: bs.固定資産 ?? null, cash: cf.現金同等物期末 ?? bs.現金及び預金 ?? null,
     ta: bs.総資産 ?? t.totalAssets ?? null,
-    cl: bs.流動負債 ?? null, fl: bs.固定負債 ?? null, debt: sumOf(DEBT_Q.map((k) => bs[k])),
+    cl: bs.流動負債 ?? null, fl: bs.固定負債 ?? null, debt: sumOf(DEBT_Q.map((k) => bs[k])) ?? (bs.流動負債 !== undefined ? 0 : null),
     na: bs.純資産 ?? t.netAssets ?? null, cap: bs.資本金 ?? null, eq: t.equity ?? null,
     eqr: t.equityRatio === null || t.equityRatio === undefined ? null : t.equityRatio / 100,
     ocf, icf, fcf0: cf.財務CF ?? null, fcf: ocf !== null && icf !== null ? ocf + icf : null,

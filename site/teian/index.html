@@ -229,6 +229,7 @@ import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
+import { currentTerm } from "./genjo.js";
 
 const $ = (id) => document.getElementById(id);
 const n = (v) => Number(String(v ?? "").replace(/[^\d.\-]/g, "")) || 0;
@@ -634,7 +635,7 @@ $("slabel").addEventListener("input", recalcStable);
 $("load").onclick = load;
 $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 
-$("go").onclick = () => {
+$("go").onclick = async () => {
   if (!ctx) return;
   readInputs();
   renderShindan();
@@ -654,6 +655,12 @@ $("go").onclick = () => {
   // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
   // 入口ごとに呼ぶと漏れるので、組み立てる直前に必ず読み直す。
   readTanshin(true);
+  // 「事業の状況」の四半期と今期予想は短信から入る。まだ読み込んでいなければ、ここで1回だけIRから取る。
+  if (needTanshin()) {
+    $("go").disabled = true;
+    try { await autoTanshin(); } finally { $("go").disabled = false; }
+    readTanshin(true);
+  }
   pages = buildProposal(ctx);
   render();
   // 資料は入っているのに下書きをしていないと、文章に反映されない。
@@ -688,7 +695,8 @@ function blocksHTML(blocks, depth = 0) {
 function tableHTML(t) {
   const cell = (c, i) => `<td class="${/^[\d,\.%\-—円株倍]+$/.test(c) ? "n" : ""}">${markTodo(c)}</td>`;
   return (t.caption ? `<div class="cap">${esc(t.caption)}</div>` : "") +
-    `<table><tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+    `<table>` + (t.groups ? `<tr>${t.groups.map((g) => `<th colspan="${g.span}" style="text-align:center">${esc(g.text)}</th>`).join("")}</tr>` : "") +
+    `<tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
     t.rows.map((r, i) => `<tr class="${t.pick === i ? "pick" : ""}">${r.map(cell).join("")}</tr>`).join("") +
     (t.foot ? `<tr>${t.foot.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` : "") +
     `</table>` + (t.note ? `<p class="note">${esc(t.note)}</p>` : "");
@@ -864,6 +872,64 @@ ${j.text}`);
   $("irload2").textContent =
     `${picked.length}本を読み込みました（${$("material").value.length.toLocaleString()}字）。`;
   $("irload").disabled = false;
+}
+
+/** 有報の直近期の翌期（＝今期）の短信が、資料の欄にまだ無いか。 */
+function needTanshin() {
+  if (!ctx || ctx.irAutoDone) return false;
+  const ys = Object.keys(ctx.fin?.["売上高"] || ctx.fin?.["純利益"] || {}).sort();
+  const lastY = Number(ys[ys.length - 1]);
+  const cur = currentTerm(ctx.tanshinAll);
+  return !!lastY && !(cur && cur.fy === lastY + 1);
+}
+
+/**
+ * 今期の決算短信（通期の短信と各四半期）をIRから探して読み込む。提案書を作るときに1回だけ。
+ * 有報の直近期末より後に出た短信を新しい順に4本まで。中期経営計画も1本あれば一緒に入れる（文章の材料）。
+ */
+async function autoTanshin() {
+  ctx.irAutoDone = true;
+  const el = $("gomsg");
+  const ys = Object.keys(ctx.fin?.["売上高"] || ctx.fin?.["純利益"] || {}).sort();
+  const km = String(ctx.kessan || "").replace(/[^\d]/g, "").padStart(2, "0");
+  const since = `${ys[ys.length - 1]}-${km}-01`;
+  el.textContent = "今期の決算短信をIRから探しています（10秒ほど）…";
+  try {
+    const res = await fetch(`${API}/api/ir`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "find", code: ctx.code, url: $("irurl").value.trim() || undefined }),
+    });
+    const j = await res.json();
+    if (!res.ok) { el.textContent = "IRから短信を取れなかった。「IR資料を探す」から読み込める。"; return; }
+    const have = $("material").value;
+    const docs = j.docs || [];
+    const pick = [
+      ...docs.filter((d) => d.kind === "決算短信" && (d.date || "") >= since)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 4),
+      ...(/中期経営計画/.test(have) ? [] : docs.filter((d) => d.kind === "中期経営計画").slice(0, 1)),
+    ].filter((d) => !have.includes(d.title));
+    if (!pick.length) { el.textContent = "今期の決算短信がIRに見つからなかった。"; return; }
+    const parts = [];
+    for (let i = 0; i < pick.length; i++) {
+      const d = pick[i];
+      el.textContent = `IR資料を読み込んでいます… ${i + 1}/${pick.length}`;
+      try {
+        const r = await fetch(`${API}/api/ir`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: "text", url: d.url }),
+        });
+        const t = await r.json();
+        if (r.ok) parts.push(`=== ${d.title}（${d.date || "日付なし"}） ===
+${t.text}`);
+      } catch { /* 次の資料へ */ }
+    }
+    if (parts.length) {
+      $("material").value = (have.trim() ? have.trim() + "\n\n" : "") + parts.join("\n\n");
+      el.textContent = `IRから${parts.length}本を読み込みました。`;
+    }
+  } catch {
+    el.textContent = "IRにつながらなかった。「IR資料を探す」から読み込める。";
+  }
 }
 
 /**

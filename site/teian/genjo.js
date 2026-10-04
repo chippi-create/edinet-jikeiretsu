@@ -1,7 +1,7 @@
 // genjo.js — 提案書の冒頭「御社の現状」2ページ
 //
-// ① 業績と中期経営計画：通期の推移・今期予想・中計目標を1枚に並べ、
-//    直近四半期の進捗が前年と比べて順調か遅れているかを出す。
+// ① 事業の状況：PL・BS・CF・株価指標を、通期実績（最大5期）・今期の四半期累計・今期予想・中計の順に1枚の表に並べる。
+//    見出しの一文は、直近四半期の進捗が前年と比べて順調か遅れているかと、中計の達成に要る伸び。
 // ② 資本効率と株主構成：ROE・自己資本比率・PBR・配当性向と、株主の顔ぶれ。
 //
 // 判定は数字の比較だけで行う（前年同期の進捗率との差、中計に要る伸び率と過去の伸び率）。
@@ -111,113 +111,151 @@ export function chukeiGap(ck, base, baseYear, fin) {
   return { years, rows: out };
 }
 
-// ---- ① 業績と中期経営計画 -------------------------------------------------
+// ---- ① 事業の状況 ---------------------------------------------------------
+//
+// 本人の指定した並び（上からPL・BS・CF・その他）で、左から
+//   通期実績（有報・最大5期）→ 今期の四半期累計（短信）→ 今期の通期予想（短信）→ 中計目標（画面で入力）
+// を1枚の表に並べる。有報は円、短信は百万円なので、ここで百万円（切り捨て）にそろえる。
+
+/** 短信を決算期と四半期でならべ、今期の四半期累計と、今期の通期予想を出す。 */
+export function currentTerm(all) {
+  const list = (all || []).map((t) => ({ t, fy: fyOf(t.period), q: quarterNo(t.quarter) }))
+    .filter((x) => x.fy && x.q)
+    .sort((a, b) => a.fy - b.fy || a.q - b.q || String(a.t.announced || "").localeCompare(String(b.t.announced || "")));
+  if (!list.length) return null;
+  const last = list[list.length - 1];
+  // 通期の決算短信なら、載っている予想は翌期のもの。四半期はまだ無い。
+  const fy = last.q === 4 ? last.fy + 1 : last.fy;
+  const byQ = new Map();
+  for (const x of list) if (x.fy === fy && x.q < 4 && x.t.actual) byQ.set(x.q, x.t);   // 同じ四半期は後のものを使う
+  return { fy, quarters: [...byQ.keys()].sort().map((q) => ({ q, t: byQ.get(q) })), forecast: last.t.forecast ? last.t : null };
+}
+
+const BIZ_ROWS = [
+  ["PL"],
+  ["売上高", "sales"], ["売上高伸び率", "salesG"], ["営業利益", "op"], ["営業利益伸び率", "opG"],
+  ["経常利益", "ord"], ["当期純利益", "net"], ["1株当たり配当金（円）", "dps"],
+  ["BS（資産）"],
+  ["流動資産", "ca"], ["固定資産", "fa"], ["現金・現金同等物", "cash"], ["総資産", "ta"],
+  ["BS（負債）"],
+  ["流動負債", "cl"], ["固定負債", "fl"], ["有利子負債", "debt"],
+  ["BS（純資産）"],
+  ["純資産", "na"], ["資本金", "cap"], ["自己資本", "eq"], ["自己資本比率", "eqr"],
+  ["キャッシュフロー"],
+  ["営業CF", "ocf"], ["投資CF", "icf"], ["財務CF", "fcf0"], ["フリーCF（営業CF＋投資CF）", "fcf"],
+  ["その他"],
+  ["EPS（円）", "eps"], ["BPS（円）", "bps"], ["PER（倍）", "per"], ["PBR（倍）", "pbr"],
+];
+const DEBT = ["短期借入金", "コマーシャルペーパー", "1年内返済長期借入金", "長期借入金", "社債"];
+const DEBT_Q = ["短期借入金", "コマーシャルペーパー", "一年内返済長期借入金", "長期借入金", "社債", "一年内償還社債"];
+const sumOf = (vals) => { const v = vals.filter((x) => x !== null && x !== undefined); return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+const growthOf = (cur, prev) => (cur === null || cur === undefined || !(prev > 0)) ? null : cur / prev - 1;
+
+/** 有報の1期ぶん。金額は百万円（切り捨て）。 */
+function yearCol(get, y) {
+  const m = (k) => mm(get(k, y));
+  const fl = get("固定負債", y) ?? (get("負債合計", y) !== null && get("流動負債", y) !== null ? get("負債合計", y) - get("流動負債", y) : null);
+  const ta = get("総資産", y), eqr = asRatio(get("自己資本比率", y));
+  const ocf = get("営業CF", y), icf = get("投資CF", y);
+  const per = get("株価収益率", y), eps = get("EPS", y), bps = get("BPS", y);
+  const price = per > 0 && eps > 0 ? per * eps : null;
+  const prev = String(Number(y) - 1);
+  return {
+    sales: m("売上高"), op: m("営業利益"), ord: m("経常利益"), net: m("純利益"), dps: get("1株当たり配当", y),
+    salesG: growthOf(get("売上高", y), get("売上高", prev)), opG: growthOf(get("営業利益", y), get("営業利益", prev)),
+    ca: m("流動資産"), fa: m("固定資産"), cash: m("現金及び現金同等物"), ta: mm(ta),
+    cl: m("流動負債"), fl: mm(fl), debt: mm(sumOf(DEBT.map((k) => get(k, y)))),
+    na: m("純資産"), cap: m("資本金"), eq: ta !== null && eqr !== null ? mm(ta * eqr) : null, eqr,
+    ocf: mm(ocf), icf: mm(icf), fcf0: m("財務CF"), fcf: ocf !== null && icf !== null ? mm(ocf + icf) : null,
+    eps, bps, per, pbr: price && bps > 0 ? price / bps : null,
+  };
+}
+
+/** 短信の四半期累計1本ぶん（短信は百万円）。伸び率は前年同期比。 */
+function quarterCol(t) {
+  const a = t.actual || {}, p = t.prior || {}, bs = t.bs || {}, cf = t.cf || {};
+  const ocf = cf.営業CF ?? null, icf = cf.投資CF ?? null;
+  return {
+    sales: a.売上高 ?? null, op: a.営業利益 ?? null, ord: a.経常利益 ?? null, net: a.純利益 ?? null, dps: null,
+    salesG: growthOf(a.売上高, p.売上高), opG: growthOf(a.営業利益, p.営業利益),
+    ca: bs.流動資産 ?? null, fa: bs.固定資産 ?? null, cash: cf.現金同等物期末 ?? bs.現金及び預金 ?? null,
+    ta: bs.総資産 ?? t.totalAssets ?? null,
+    cl: bs.流動負債 ?? null, fl: bs.固定負債 ?? null, debt: sumOf(DEBT_Q.map((k) => bs[k])),
+    na: bs.純資産 ?? t.netAssets ?? null, cap: bs.資本金 ?? null, eq: t.equity ?? null,
+    eqr: t.equityRatio === null || t.equityRatio === undefined ? null : t.equityRatio / 100,
+    ocf, icf, fcf0: cf.財務CF ?? null, fcf: ocf !== null && icf !== null ? ocf + icf : null,
+    eps: t.eps ?? null, bps: null, per: null, pbr: null,
+  };
+}
+
+/** 今期の通期予想（短信）。伸び率は前期実績（有報）比。 */
+function forecastCol(t, get, lastY) {
+  const f = t.forecast;
+  return {
+    sales: f.売上高, op: f.営業利益, ord: f.経常利益, net: f.純利益, dps: t.dividendForecast ?? null,
+    salesG: growthOf(f.売上高 * 1e6, get("売上高", lastY)), opG: growthOf(f.営業利益 * 1e6, get("営業利益", lastY)),
+    eps: t.epsForecast ?? null,
+  };
+}
 
 export function pageBiz(ctx) {
-  const { fin = {} } = ctx;
-  const t = ctx.tanshin?.forecast || ctx.tanshin?.actual ? ctx.tanshin : null;
-  const ck = ctx.chukei && (ctx.chukei.sales || ctx.chukei.op || ctx.chukei.roe) ? ctx.chukei : null;
-  const years = [...new Set(["売上高", "営業利益", "純利益"]
-    .flatMap((k) => Object.keys(fin[k] || {})))].sort().slice(-3);
-  const at = (k, y) => mm(num(fin[k]?.[y]));
-  const kessan = (ctx.kessan || "").replace(/^0/, "").replace("月期", "");
+  const { fin = {}, ext = {} } = ctx;
+  const get = (k, y) => num((fin[k] ?? ext[k])?.[y]);
+  const ck = ctx.chukei && (ctx.chukei.sales || ctx.chukei.op) ? ctx.chukei : null;
+  const years = [...new Set(["売上高", "純利益", "総資産", "営業CF"]
+    .flatMap((k) => Object.keys(fin[k] || {})))].sort().slice(-5);
+  const lastY = years[years.length - 1];
+  const km = Number(String(ctx.kessan || "").replace(/[^\d]/g, "")) || null;
+  const ym = (y) => km ? `${y}/${km}` : String(y);
+  const cur = currentTerm(ctx.tanshinAll?.length ? ctx.tanshinAll : (ctx.tanshin ? [ctx.tanshin] : []));
+  // 今期＝有報の直近期の翌期。短信がそれより古ければ使わない（前の期の短信を今期として出さない）。
+  const term = cur && lastY && cur.fy === Number(lastY) + 1 ? cur : null;
 
-  const head = ["（百万円）", ...years.map((y) => `${y}/${kessan}`),
-    ...(t?.forecast ? [`${t.period}予想`] : []),
-    ...(ck ? [`中計目標（${ck.year}）`] : [])];
-  const line = (label, k, fc, target) => [label, ...years.map((y) => fmt(at(k, y))),
-    ...(t?.forecast ? [fmt(fc)] : []), ...(ck ? [target ? fmt(target) : "—"] : [])];
-  const margin = (y) => { const s = at("売上高", y), o = at("営業利益", y); return s > 0 && o !== null ? o / s : null; };
-  const rows = [
-    line("売上高", "売上高", t?.forecast?.売上高, ck?.sales),
-    line("営業利益", "営業利益", t?.forecast?.営業利益, ck?.op),
-    ["営業利益率", ...years.map((y) => pct(margin(y))),
-      ...(t?.forecast ? [pct(div(t.forecast.営業利益, t.forecast.売上高))] : []),
-      ...(ck ? [pct(div(ck.op, ck.sales))] : [])],
-    line("当期純利益", "純利益", t?.forecast?.純利益, null),
-    ["ROE", ...years.map((y) => pct(asRatio(num(fin["ROE"]?.[y])))),
-      ...(t?.forecast ? ["—"] : []), ...(ck ? [ck.roe ? pct(ck.roe) : "—"] : [])],
+  const cols = [
+    ...years.map((y) => ({ head: ym(y), v: yearCol(get, y) })),
+    ...(term?.quarters || []).map(({ q, t }) => ({ head: q === 2 ? "中間期" : `${q}Q累計`, v: quarterCol(t) })),
+    ...(term?.forecast ? [{ head: "通期予想", v: forecastCol(term.forecast, get, lastY) }] : []),
+    ...(ck ? [{ head: `${String(ck.year).replace(/年(\d+)月期/, "/$1")}${/期/.test(String(ck.year)) ? "期" : ""}目標`,
+      v: { sales: ck.sales || null, op: ck.op || null } }] : []),
+  ];
+  const show = (key, v) => {
+    if (v === null || v === undefined || Number.isNaN(v)) return "—";
+    if (key === "salesG" || key === "opG" || key === "eqr") return pct(v);
+    if (key === "dps" || key === "eps" || key === "bps") return Number.isInteger(v) ? fmt(v) : v.toFixed(2);
+    if (key === "per" || key === "pbr") return v.toFixed(key === "pbr" ? 2 : 1);
+    return fmt(v);
+  };
+  const rows = BIZ_ROWS.map(([label, key]) => key
+    ? [label, ...cols.map((c) => show(key, c.v[key]))]
+    : [label, ...cols.map(() => "")]);
+  const groups = [
+    { text: "", span: 1 },
+    { text: "通期実績（有価証券報告書）", span: years.length },
+    ...(term && (term.quarters.length || term.forecast)
+      ? [{ text: `今期（${ym(term.fy)}期・決算短信）`, span: term.quarters.length + (term.forecast ? 1 : 0) }] : []),
+    ...(ck ? [{ text: "中期経営計画", span: 1 }] : []),
   ];
 
-  const items = [];
-  // 全部「—」の行（売上の無い会社の売上高・利益率など）は落とす。
-  const filled = rows.filter((r) => r.slice(1).some((c) => c !== "—"));
-  const tables = [{ caption: "業績の推移（有価証券報告書・決算短信）", head, rows: filled }];
-
-  // 足元（直近四半期）
+  const t = ctx.tanshin?.forecast || ctx.tanshin?.actual ? ctx.tanshin : null;
   const pg = progress(t, fin);
-  if (t?.actual) {
-    const a = t.actual;
-    const g = yoy(a.売上高, t.prior?.売上高);
-    items.push(`${a.期}累計は売上高${fmt(a.売上高)}百万円` +
-      (g !== null ? `（前年同期比${g >= 0 ? "+" : "−"}${Math.abs(g * 100).toFixed(1)}%）` : "") +
-      `、営業${a.営業利益 < 0 ? "損失" : "利益"}${fmt(Math.abs(a.営業利益))}百万円` +
-      (t.prior ? `（前年同期は営業${t.prior.営業利益 < 0 ? "損失" : "利益"}${fmt(Math.abs(t.prior.営業利益))}百万円）` : "") + "。");
-  } else {
-    items.push(TODO("直近四半期の実績（決算短信の読み込みで入る）"));
-  }
-  if (pg) {
-    for (const r of pg.rows) {
-      if (r.rate === null) {
-        if (r.item === "営業利益" && (r.cur <= 0 || r.fc <= 0)) {
-          items.push("営業利益は赤字を含むため、進捗率では測れない。" +
-            (t.halfForecast && pg.q <= 2 ? `上期予想は営業${t.halfForecast.営業利益 < 0 ? "損失" : "利益"}${fmt(Math.abs(t.halfForecast.営業利益))}百万円。` : ""));
-        }
-        continue;
-      }
-      items.push(`通期予想に対する${r.item}の進捗率は${pct(r.rate)}` +
-        (r.prate !== null ? `（前年同期は${pct(r.prate)}、${pt(r.diff)}）→ **${r.verdict}**。` : "。前年同期と比べる材料が無い。"));
-    }
-    tables.push({
-      caption: `通期予想に対する進捗（${pg.label}累計）`,
-      head: ["", "累計実績", "通期予想", "進捗率", "前年同期の進捗率", "判定"],
-      rows: pg.rows.map((r) => [r.item, fmt(r.cur), fmt(r.fc), pct(r.rate), pct(r.prate), r.verdict || "—"]),
-      note: "前年同期の進捗率＝前年同期の累計÷前年の通期実績（有報）。季節性があるので25%・50%とではなく前年と比べる。±3pt以内は前年並み。",
-    });
-  }
-  const qs = quarters(ctx.tanshinAll, t?.period);
-  if (qs) {
-    tables.push({
-      caption: "四半期ごと（単独・百万円）",
-      head: ["", ...qs.map((q) => `${q.q}Q`)],
-      rows: [["売上高", ...qs.map((q) => fmt(q.売上高))], ["営業利益", ...qs.map((q) => fmt(q.営業利益))]],
-      note: "2Q単独＝2Q累計−1Q累計。読み込んだ決算短信から計算。",
-    });
-  }
-
-  // 中計
-  const baseYear = t?.forecast ? fyOf(t.period) : fyOf(years[years.length - 1]);
   const base = t?.forecast ? t.forecast
-    : { 売上高: at("売上高", years[years.length - 1]), 営業利益: at("営業利益", years[years.length - 1]) };
-  const gap = ck ? chukeiGap(ck, base, baseYear, fin) : null;
-  if (gap && gap.rows.length) {
-    for (const r of gap.rows) {
-      const basis = t?.forecast ? "今期予想" : "直近実績";
-      // 起点が赤字だと、達成率も必要な伸び率も意味を持たない（−248 ÷ 500 ＝ −50%）。
-      if (!(r.base > 0)) {
-        items.push(`中計目標（${ck.year}）の${r.item}${fmt(r.target)}百万円に対し、` +
-          `${basis}は${r.item === "営業利益" ? "営業損失" : ""}${fmt(Math.abs(r.base))}百万円。黒字化が前提の目標。`);
-        continue;
-      }
-      items.push(`中計目標（${ck.year}）の${r.item}${fmt(r.target)}百万円に対し、` +
-        `${basis}は${fmt(r.base)}百万円（${pct(r.ratio, 0)}）。` +
-        (r.need !== null && r.need > 0
-          ? (gap.years === 1 ? `来期に${(r.target / r.base).toFixed(1)}倍が要る`
-                             : `残り${gap.years}年で年${pct(r.need)}の伸びが要る`) +
-            (r.past !== null ? `（過去3年は年${pct(r.past)}）→ **${r.verdict}**。` : "。")
-          : r.verdict ? `→ **${r.verdict}**。` : ""));
-    }
-  } else {
-    items.push(TODO("中計の目標（年度・売上高・営業利益・ROE）の入力で、達成に要る伸びを算出"));
-  }
+    : { 売上高: mm(get("売上高", lastY)), 営業利益: mm(get("営業利益", lastY)) };
+  const gap = ck ? chukeiGap(ck, base, t?.forecast ? fyOf(t.period) : fyOf(lastY), fin) : null;
+  const missing = [
+    !term?.quarters.length ? "今期の四半期" : null,
+    !term?.forecast ? "今期予想" : null,
+  ].filter(Boolean);
 
-  const lead = leadBiz(pg, gap);
   return {
-    no: 1, title: "御社の現状①　業績と中期経営計画",
-    lead: lead || TODO("業績の現状を一文で"),
-    blocks: [{ items }],
-    tables,
-    notes: ["出典：有価証券報告書（EDINET）、決算短信" + (ck ? "、中期経営計画（目標値は画面で入力）" : "") + "。単位は百万円。"],
+    no: 1, title: "事業の状況",
+    lead: leadBiz(pg, gap) || TODO("業績の現状を一文で"),
+    layout: "fullTable",
+    tables: [{ caption: "", head: ["（百万円）", ...cols.map((c) => c.head)], groups, rows, section: true }],
+    notes: [
+      "出典：有価証券報告書、決算短信" + (ck ? "、中期経営計画" : "") + "。百万円未満切り捨て。伸び率は四半期が前年同期比、予想が前期比。" +
+      "PER・PBRは有報の期末値（株価＝PER×EPS）。四半期の現金は現金及び預金。",
+      ...(missing.length ? [`${missing.join("・")}は決算短信が読み込めると入る。`] : []),
+    ],
   };
 }
 

@@ -80,6 +80,7 @@ export function parseTanshin(text) {
     company: null, code: null, period: null, quarter: null,
     announced: null, forecast: null, halfForecast: null, actual: null, prior: null,
     equityRatio: null, dividendForecast: null, source: "決算短信",
+    eps: null, epsForecast: null, totalAssets: null, netAssets: null, equity: null, bs: null, cf: null,
   };
 
   // 表紙。「2027年4月期 第1四半期決算短信」と提出日。
@@ -107,6 +108,12 @@ export function parseTanshin(text) {
       const f = pickFour(lines[i]);
       if (f) {
         out.forecast = { 売上高: f[0], 営業利益: f[1], 経常利益: f[2], 純利益: f[3] };
+        // 行末の小数が1株当たり当期純利益（「… 137 32.8 11.34」）。金額が4つ並んだ後にあるときだけ。
+        const cells = norm(lines[i]).split(" ").filter(Boolean);
+        const last = cells[cells.length - 1];
+        if (/\./.test(last) && toNum(last) !== null && cells.filter((c) => /[,，]/.test(c) || /^[△▲-]?\d+$/.test(c)).length >= 4) {
+          out.epsForecast = toNum(last);
+        }
       }
       break;
     }
@@ -142,11 +149,87 @@ export function parseTanshin(text) {
     }
   }
 
+  // 1株当たり四半期純利益（実績）。見出しの後ろで、年月期で始まる最初の行の最初の数字。
+  const ei = lines.findIndex((l) => /1株当たり/.test(norm(l)) && /純利益/.test(norm(lines[lines.indexOf(l) + 1] || "") + norm(l)));
+  if (ei >= 0 && ai >= 0) {
+    for (let i = ei; i < Math.min(lines.length, ei + 8); i++) {
+      const l = norm(lines[i]);
+      if (!/^\s*\d{4}年\s*\d{1,2}月期/.test(l)) continue;
+      const v = l.replace(/^\s*\d{4}年\s*\d{1,2}月期\s*(第\d四半期|中間期)?/, "").trim().split(" ")[0];
+      out.eps = toNum(v);
+      break;
+    }
+  }
+
+  // 財政状態。「2027年4月期第1四半期 8,598 5,815 65.7」の総資産・純資産。
+  const zi = lines.findIndex((l) => /財政状態/.test(norm(l)));
+  if (zi >= 0) {
+    for (let i = zi; i < Math.min(lines.length, zi + 8); i++) {
+      const l = norm(lines[i]);
+      if (!/^\s*\d{4}年\s*\d{1,2}月期/.test(l)) continue;
+      const ns = l.replace(/^\s*\d{4}年\s*\d{1,2}月期\s*(第\d四半期|中間期)?/, "").trim().split(" ").map(toNum).filter((v) => v !== null);
+      if (ns.length >= 2) { out.totalAssets = ns[0]; out.netAssets = ns[1]; }
+      break;
+    }
+    const ref = /\(参考\)\s*自己資本\s*\d{4}年\s*\d{1,2}月期\s*(第\d四半期|中間期)?\s*([△▲\-]?[\d,]+)\s*百万円/.exec(norm(text));
+    if (ref) out.equity = toNum(ref[2]);
+  }
+
+  // 年間配当の予想。「2027年4月期(予想) 0.00 - 10.00 10.00」の最後の数字（合計）。
+  const dv = lines.find((l) => /^\s*\d{4}年\s*\d{1,2}月期\s*\(予想\)/.test(norm(l)));
+  if (dv) {
+    const ns = norm(dv).split(" ").map(toNum).filter((v) => v !== null);
+    if (ns.length) out.dividendForecast = ns[ns.length - 1];
+  }
+
+  // 四半期末の貸借対照表とキャッシュ・フロー計算書（添付資料）。
+  out.bs = statement(lines, /貸借対照表/, BS_ROWS);
+  out.cf = statement(lines, /キャッシュ・フロー計算書/, CF_ROWS);
+
   // 自己資本比率。「自己資本比率」の後ろに並ぶ最初の数字。
   const eq = /自己資本比率[\s\S]{0,120}?(\d{1,3}\.\d)\s*$/m.exec(norm(text).replace(/ /g, "\n"));
   if (eq) out.equityRatio = Number(eq[1]);
 
   return (out.forecast || out.actual) ? out : null;
+}
+
+// 添付資料の表から拾う行。「科目 前期末 当四半期末」と並ぶので、行末の数字を当期とする。
+const BS_ROWS = {
+  流動資産: /^流動資産合計$/, 固定資産: /^固定資産合計$/, 総資産: /^資産合計$/,
+  流動負債: /^流動負債合計$/, 固定負債: /^固定負債合計$/, 純資産: /^純資産合計$/,
+  資本金: /^資本金$/, 現金及び預金: /^現金及び預金$/,
+  短期借入金: /^短期借入金$/, 一年内返済長期借入金: /^1年内返済予定の長期借入金$/,
+  長期借入金: /^長期借入金$/, 社債: /^社債$/, 一年内償還社債: /^1年内償還予定の社債$/,
+  コマーシャルペーパー: /^コマーシャル・?ペーパー$/,
+};
+const CF_ROWS = {
+  営業CF: /^営業活動による(キャッシュ・フロー|CF)$/, 投資CF: /^投資活動による(キャッシュ・フロー|CF)$/,
+  財務CF: /^財務活動による(キャッシュ・フロー|CF)$/, 現金同等物期末: /^現金及び現金同等物の(四半期末|中間期末|期末)残高$/,
+};
+
+/**
+ * 「(単位：千円)」の表から科目ごとの当期の数字を拾い、百万円（切り捨て）にそろえる。
+ * 見出しの後ろの最初の表だけを見る（後ろの説明資料に同じ科目名の表があるため）。
+ */
+function statement(lines, heading, want) {
+  const hi = lines.findIndex((l) => heading.test(norm(l)) && !/…|\.{3}/.test(l));
+  if (hi < 0) return null;
+  let unit = 1;   // 百万円あたりの倍率の逆数（千円なら 1/1000）
+  const out = {};
+  for (let i = hi; i < Math.min(lines.length, hi + 160); i++) {
+    const l = norm(lines[i]).trim();
+    const u = /単位\s*[:：]\s*(千円|百万円|円)/.exec(l);
+    if (u) { unit = u[1] === "千円" ? 1e-3 : u[1] === "円" ? 1e-6 : 1; continue; }
+    const cells = l.split(" ");
+    const nums = [];
+    while (cells.length > 1 && toNum(cells[cells.length - 1]) !== null) nums.unshift(toNum(cells.pop()));
+    if (!nums.length) continue;
+    const label = cells.join("").replace(/^[※\*]+/, "");
+    for (const [k, re] of Object.entries(want)) {
+      if (out[k] === undefined && re.test(label)) out[k] = Math.trunc(nums[nums.length - 1] * unit);
+    }
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /**

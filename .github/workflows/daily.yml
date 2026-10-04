@@ -27,8 +27,8 @@ on:
         description: "証券コード（カンマ区切り）。入れるとその会社だけを取り直す"
         default: ""
       past_years:
-        description: "証券コードを入れたとき、所有者別・大株主を前の期から何期ぶん取るか（0なら取らない）"
-        default: "2"
+        description: "証券コードを入れたとき、前の期の有報から何期ぶん補うか（財務の欠けた年・所有者別・大株主。0なら取らない）"
+        default: "3"
 
 permissions:
   contents: write
@@ -68,6 +68,7 @@ jobs:
           LIMIT: ${{ inputs.limit || '600' }}
           # 指定した会社だけを取り直すときに使う。順番待ちを飛ばせる。
           SEC_CODES: ${{ inputs.codes }}
+          PAST_YEARS: ${{ inputs.past_years || '0' }}
 
       # 記述部分が落ちても財務ぶんは残したいので、ここで止めない。
       - name: fetch sections

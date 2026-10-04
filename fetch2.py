@@ -18,6 +18,11 @@ import requests
 BASE = "https://api.edinet-fsa.go.jp/api/v2"
 API_KEY = os.environ.get("EDINET_API_KEY", "")
 SEC_CODES = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
+# 証券コード指定のときだけ、前の期の有報からも数字を取り、欠けている年を埋める（何期さかのぼるか）。
+# 営業利益と貸借対照表の区分は有報1本に2年分しか無いので、前の期の有報を足すと4〜5年分になる。
+PAST_YEARS = int(os.environ.get("PAST_YEARS", "0") or 0)
+# 前の期の有報から埋めた行の印。最新の有報を取り直しても消さない（最新の有報に無い年だけ）。
+PAST_MARK = "過去の有報"
 # 0 なら索引にある全社が対象。数字を入れるとその社数だけ試しに取る。
 AUTO_PICK = int(os.environ.get("AUTO_PICK", "0") or "0")
 
@@ -479,7 +484,7 @@ def save_all(rows, state):
     os.makedirs(DATA_DIR, exist_ok=True)
     flat = []
     for sec in sorted(rows):
-        flat.extend(sorted(rows[sec], key=lambda r: (r["指標"], r["年度"])))
+        flat.extend(sorted(rows[sec], key=lambda r: (r["指標"], str(r["年度"]))))
     with open(TS_PATH, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDNAMES)
         w.writeheader()
@@ -557,6 +562,51 @@ def pick_docs(index, targets=None, quiet=False):
     return out
 
 
+def fill_past(index, rows, codes, years):
+    """指定した会社の前の期の有報を読み、まだ無い（指標, 年度）だけを足す。"""
+    by_sec = {}
+    for d in index["docs"].values():
+        sec = (d.get("secCode") or "")[:4]
+        if sec in codes and d.get("docTypeCode") == "120":
+            by_sec.setdefault(sec, []).append(d)
+    for sec in codes:
+        if not rows.get(sec):
+            log(f"  {sec}: 最新の有報がまだ取れていないので、前の期は取らない")
+            continue
+        docs = sorted(by_sec.get(sec, []), key=lambda x: x.get("submitDateTime") or "", reverse=True)
+        seen, past = set(), []
+        for d in docs:
+            pe = (d.get("periodEnd") or "")[:10]
+            if pe and pe not in seen:
+                seen.add(pe)
+                past.append(d)
+        past = past[1:1 + years]
+        if len(past) < years:
+            log(f"  {sec}: 索引にある前の期の有報は {len(past)}本（足りなければ edinet-index で遡る）")
+        head = rows[sec][0]
+        for d in past:
+            have = {(r["指標"], str(r["年度"])) for r in rows[sec]}
+            text = download_csv(d["docID"])
+            if text is None:
+                log(f"  {sec} {d['docID']}: CSVを取得できませんでした")
+                continue
+            meta, data = normalize(text)
+            if meta is None:
+                continue
+            n = 0
+            for label, v in data.items():
+                for y, dd in v.items():
+                    if (label, str(y)) in have:
+                        continue
+                    rows[sec].append({
+                        "証券コード": sec, "会社名": head["会社名"], "会計基準": head["会計基準"],
+                        "決算期": head["決算期"], "年度": str(y), "指標": label, "値": dd["値"],
+                        "この値の基準": dd["基準"], "出所書類": d["docID"], "本体か訂正か": PAST_MARK,
+                    })
+                    n += 1
+            log(f"  {sec} {(d.get('periodEnd') or '')[:10]}期の有報: 欠けていた {n}件を補った")
+
+
 def main():
     if not API_KEY:
         log("EDINET_API_KEY が設定されていません。")
@@ -579,6 +629,10 @@ def main():
         log("対象がありません。")
         sys.exit(1)
 
+    # 前の期の有報で欠けている年を埋める（証券コード指定のときだけ）。
+    # 最新の有報をこのあと取り直す会社は、取り直しのあとに埋める。
+    past_codes = SEC_CODES if PAST_YEARS > 0 else []
+
     # 一度も取れていない会社を先に、前の版で取った会社を後に回す。
     # 項目を足すたびに0000番からやり直すと、後ろの番号の会社がいつまでも回ってこない。
     pending = sorted((sec for sec in picked if needs_update(sec, picked[sec], state)),
@@ -586,6 +640,10 @@ def main():
     log(f"■ 索引にある会社 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。取得するものはありません。")
+        if past_codes:
+            log(f"■ 前の期の有報から補う: {PAST_YEARS}期さかのぼる")
+            fill_past(index, rows, past_codes, PAST_YEARS)
+            save_all(rows, state)
         return
     picked = {sec: picked[sec] for sec in pending[:LIMIT]}
     log(f"■ 今回の対象: {len(picked)}社（1回の上限 {LIMIT}社。残りは次回の実行で）")
@@ -684,7 +742,10 @@ def main():
             log(f"   {label:<12}" + "".join(f"{c:>16}" for c in cells))
 
         # その会社ぶんを丸ごと差し替える（訂正で値が変わることがあるため追記はしない）
-        rows[sec] = [{
+        # ただし前の期の有報で補った行は、最新の有報に無い年なら残す。
+        kept = [r for r in rows.get(sec, []) if r.get("本体か訂正か") == PAST_MARK
+                and str(r["年度"]) not in {str(y) for y in merged.get(r["指標"], {})}]
+        rows[sec] = kept + [{
             "証券コード": sec, "会社名": meta["name"], "会計基準": meta["kijun"],
             "決算期": meta["kessan"], "年度": y, "指標": label, "値": d["値"],
             "この値の基準": d["基準"], "出所書類": d["出所"], "本体か訂正か": d["種別"],
@@ -703,6 +764,11 @@ def main():
         if done % 50 == 0:
             save_all(rows, state)
             log(f"   （途中保存：{done}社ぶん）")
+
+    if past_codes:
+        log("")
+        log(f"■ 前の期の有報から補う: {PAST_YEARS}期さかのぼる")
+        fill_past(index, rows, past_codes, PAST_YEARS)
 
     total = save_all(rows, state)
 

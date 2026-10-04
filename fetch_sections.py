@@ -338,6 +338,24 @@ def seed_ownhist(own, sh, state):
         log(f"■ 所有者別・大株主の期ごとの記録を {n}社 で積みはじめました")
 
 
+def interim_end(doc):
+    """半期報告書の基準日（中間期末）。索引の periodStart/periodEnd は事業年度の始めと終わりなので、
+    期首から6か月後の前日にする（2026-01-01 → 2026-06-30）。期首が無ければ期末の6か月前の月末。"""
+    import datetime
+    ps, pe = (doc.get("periodStart") or "")[:10], (doc.get("periodEnd") or "")[:10]
+    try:
+        if ps:
+            d = datetime.date.fromisoformat(ps)
+            y, m = d.year + (d.month + 5) // 12, (d.month + 5) % 12 + 1
+            return (datetime.date(y, m, d.day) - datetime.timedelta(days=1)).isoformat()
+        d = datetime.date.fromisoformat(pe)
+        y, m = (d.year, d.month - 6) if d.month > 6 else (d.year - 1, d.month + 6)
+        nxt = datetime.date(y + (m == 12), m % 12 + 1, 1)
+        return (nxt - datetime.timedelta(days=1)).isoformat()
+    except ValueError:
+        return pe
+
+
 def fetch_hanki(index, state, codes, limit):
     """半期報告書の大株主の状況を取る。最新の有報より後の半期報告書だけ（それより古い断面は要らない）。
     取ったものは期ごとの記録（ownhist）に「半期報告書」として積む。"""
@@ -367,7 +385,7 @@ def fetch_hanki(index, state, codes, limit):
     n = 0
     for sec in todo[:limit]:
         h = latest[("160", sec)]
-        kijun = (h.get("periodEnd") or "")[:10]
+        kijun = interim_end(h)
         z = sections.fetch_zip(h["docID"])
         if z is None:
             log(f"  {sec} 半期 {kijun}: ZIPを取得できませんでした")

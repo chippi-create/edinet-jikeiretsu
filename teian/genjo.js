@@ -7,7 +7,7 @@
 // 判定は数字の比較だけで行う（前年同期の進捗率との差、中計に要る伸び率と過去の伸び率）。
 // 理由や背景は書かない。そこは【　】で空けて、会話の中で埋める。
 
-import { profile, looksLikeOwner, holderKind, holderLabel, ownerEstimate } from "./shindan.js";
+import { profile, looksLikeOwner, holderKind, holderLabel, ownerEstimate, isListedCorp } from "./shindan.js";
 import { quarterNo } from "./tanshin.js";
 import { asRatio, segUnit } from "./shikin.js";
 import { keieiStory } from "./keiei.js";
@@ -319,8 +319,10 @@ export function pageCapital(ctx) {
   const [cur, prev] = per.sh;
   const top = holderList(cur?.sh).slice(0, 10);
   const prevMap = new Map(holderList(prev?.sh).map((h) => [h.key, h.ratio]));
+  const listed = ctx.listedNames || null;
   const shRows = top.map((h) => [h.label,
-    looksLikeOwner(h) ? `${h.kind}（${h.ratio >= 0.5 ? "親会社か" : "資産管理会社か"}）` : h.kind,
+    isListedCorp(h, listed) ? `${h.kind}（上場会社）`
+      : looksLikeOwner(h) ? `${h.kind}（${h.ratio >= 0.5 ? "親会社か" : "資産管理会社か"}）` : h.kind,
     pct(h.ratio, 2), ...(prev ? [pct(prevMap.get(h.key) ?? null, 2)] : [])]);
 
   // 所有者別：まとめた5区分。外国は法人と個人を足す。
@@ -334,7 +336,7 @@ export function pageCapital(ctx) {
   const ownRows = CATS.map(([label, re]) => [label, ...per.own.map((p) => pct(cat(p.own, re)))]);
 
   // 推定オーナー比率（直近の大株主から）
-  const est = ownerEstimate(cur?.sh, ctx.sec?.of, ctx.basis);
+  const est = ownerEstimate(cur?.sh, ctx.sec?.of, ctx.basis, listed);
   const items = [];
   if (top.length) {
     items.push(`推定オーナー比率は${pct(est.ratio)}` +

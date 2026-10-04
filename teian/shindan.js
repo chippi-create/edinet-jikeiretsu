@@ -62,9 +62,10 @@ export function holderKind(name) {
   if (/証券|證券/.test(n)) return "証券会社";
   if (/銀行|信用金庫|信用組合|農林中央金庫/.test(n)) return "銀行";
   if (/生命保険|損害保険|火災保険|海上火災|火災海上|海上日動|損保|日本生命|明治安田|住友生命|第一生命/.test(n)) return "保険";
-  if (/投資事業|ファンド|FUND|L\.?P\.?$|LIMITED|LTD|INC|CORP|PLC/i.test(n)) return "ファンド・海外法人";
+  if (/投資事業|ファンド|FUND|L\.?P\.?$|LIMITED|LTD|INC|CORP|PLC|S\.?à?\s*r\.?l|S\.A\.|GmbH|B\.V\.|N\.V\.|PTE|LLC/i.test(n)) return "ファンド・海外法人";
   if (/株式会社|㈱|\(株\)|有限会社|㈲|合同会社|財団|社団/.test(n)) return "事業法人等";
-  if (/^[A-Z0-9 .,&'()\-]+$/i.test(n)) return "ファンド・海外法人";
+  // ラテン文字だけの名前は海外の法人（「Paxalan S.à r.l.」のようにアクセント付きの文字もある。7048）
+  if (/^[\p{Script=Latin}0-9 .,&'()\-]+$/u.test(n)) return "ファンド・海外法人";
   return "個人";
 }
 
@@ -87,7 +88,8 @@ export function holderLabel(name, kind = holderKind(name)) {
 export function looksLikeOwner(h) {
   if (h.kind !== "事業法人等") return false;
   const core = h.name.replace(/株式会社|㈱|有限会社|合同会社|\(株\)|[\s　]/g, "");
-  return (h.ratio !== null && h.ratio >= 0.1) || /^[A-Za-z0-9&.\-]{1,5}$/.test(core)
+  // 短い英字の社名は資産管理会社に多いが、JTBのような事業会社もある。3%以上持っているときだけ。
+  return (h.ratio !== null && h.ratio >= 0.1) || (/^[A-Za-z0-9&.\-]{1,5}$/.test(core) && h.ratio >= 0.03)
     || /財団|社団/.test(h.name);
 }
 
@@ -466,33 +468,61 @@ export function diagnose(ctx, pf = profile(ctx)) {
 
 /**
  * 創業家などオーナー側の持ち分を、名前と区分から推定する。
- *   上位10名の個人 ＋ 資産管理会社・親会社らしい法人（looksLikeOwner）＋ 上位10名に入っていない役員の持株
+ *   上位10名の個人 ＋ 資産管理会社・親会社らしい法人（looksLikeOwner。上場会社は除く）＋ 上位10名に入っていない役員の持株
  * 持株会・信託口・証券会社・銀行・保険は入れない。親族関係や資産管理会社かどうかは名前だけでは確定できないので、
  * 何を入れたかを全部返して、確かめられるようにする。比率の分母は大株主の表と同じ（自己株式を除く発行済株式数）。
  *   { ratio, parts:[{label, kind, ratio, why}], officers:{ratio, count}|null }
  */
-export function ownerEstimate(shRows, ofRows, basis = {}) {
+/** 社名の芯（株式会社・空白・全角半角の違いを落とす）。上場会社の一覧と照らすのに使う。 */
+export const corpCore = (name) => String(name || "").normalize("NFKC")
+  .replace(/[(（]?常任代理人.*$/, "").replace(/株式会社|有限会社|合同会社|\(株\)|㈱|[\s　]/g, "");
+
+/** 事業法人の大株主が上場会社か。listed は corpCore の Set。 */
+export const isListedCorp = (h, listed) => !!listed && h.kind === "事業法人等" && listed.has(corpCore(h.name));
+
+export function ownerEstimate(shRows, ofRows, basis = {}, listed = null) {
   const sh = holders(shRows).slice(0, 10);
   const parts = [];
   for (const h of sh) {
     if (h.ratio === null) continue;
     if (h.kind === "個人") parts.push({ label: h.label, kind: h.kind, ratio: h.ratio, why: "個人の大株主" });
+    // 上場会社は事業会社としての大株主（持ち合い・提携）で、創業家の資産管理会社ではない
+    else if (isListedCorp(h, listed)) continue;
     else if (looksLikeOwner(h)) {
       parts.push({ label: h.label, kind: h.kind, ratio: h.ratio,
         why: h.ratio >= 0.5 ? "親会社か" : "資産管理会社・親会社などか" });
     }
   }
-  // 上位10名に入っていない役員の持株（名前で重なりを落とす）
+  // 上位10名に入っていない役員の持株（名前で重なりを落とす）。
+  // 役員の状況の株数は、本人の資産管理会社を通した分も含めて書かれることがある（7048：役員の8,992千株＝
+  // 大株主「Paxalan S.à r.l.」の24.56%と同じ）。10位の株主より多いのに上位10名に名前が無い役員は、
+  // 会社を通して持っているとみて、比率がほぼ同じ（0.5pt以内）大株主をその役員の保有として1回だけ数える。
   let officers = null;
   const base = basis.issued ? basis.issued - (basis.treasury || 0) : null;
   if (ofRows && base > 0) {
     const inTop = new Set(sh.map((h) => normName(h.name)));
+    const minTop = sh.length >= 10 ? Math.min(...sh.map((h) => h.ratio ?? 1)) : 0;
     const unit = (u) => (u || "").includes("千") ? 1000 : (u || "").includes("百") ? 100 : 1;
     let total = 0, count = 0;
     for (const r of ofRows) {
-      const name = normName(String(r[1] || "").replace(/\s*注\s*\d+/g, ""));
+      const raw = String(r[1] || "").replace(/\s*注\s*\d+/g, "").trim();
+      const name = normName(raw);
       const v = num(r[4]);
       if (!name || v === null || v <= 0 || inTop.has(name)) continue;
+      const ratio = v * unit(r[5]) / base;
+      if (minTop && ratio > minTop) {
+        const via = sh.find((h) => h.ratio !== null && Math.abs(h.ratio - ratio) <= 0.005
+          && h.kind !== "信託・カストディ" && h.kind !== "証券会社");
+        const label = `${raw.replace(/[\s　]+/g, "")}氏`;
+        if (via) {
+          const had = parts.find((p) => p.label === via.label);
+          if (had) had.why += `（役員 ${label}の保有とみられる）`;
+          else parts.push({ label: via.label, kind: via.kind, ratio: via.ratio, why: `役員 ${label}の保有とみられる` });
+        } else {
+          parts.push({ label: `${label}（役員）`, kind: "役員", ratio, why: "役員の持株。大株主の表に名前が無く、会社を通した保有とみられる" });
+        }
+        continue;
+      }
       total += v * unit(r[5]);
       count++;
     }

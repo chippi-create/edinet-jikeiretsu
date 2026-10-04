@@ -317,6 +317,14 @@ def main():
     # 索引はコード順。検索と一覧はこれだけで動く。
     index = [[sec, companies[sec]["n"], companies[sec]["e"], companies[sec]["k"]]
              for sec in sorted(companies)]
+    # 上場会社の名前だけの一覧。提案書ツールで、大株主の事業法人が上場会社かどうかを見るのに使う
+    # （上場会社なら創業家の資産管理会社ではない。7048の大株主「オープンドア」）。
+    with open(os.path.join(SITE, "names.json"), "w", encoding="utf-8") as f:
+        json.dump([companies[sec]["n"] for sec in sorted(companies)], f, ensure_ascii=False, separators=(",", ":"))
+    # 上場会社の名前だけの一覧。提案書ツールで、大株主の事業法人が上場会社かどうかを見るのに使う
+    # （上場会社なら創業家の資産管理会社ではない。7048の大株主「オープンドア」）。
+    with open(os.path.join(SITE, "names.json"), "w", encoding="utf-8") as f:
+        json.dump([companies[sec]["n"] for sec in sorted(companies)], f, ensure_ascii=False, separators=(",", ":"))
 
     jst = datetime.timezone(datetime.timedelta(hours=9))
     generated = datetime.datetime.now(jst).strftime("%Y-%m-%dT%H:%M:%S+09:00")

@@ -231,7 +231,7 @@
 import { buildProposal, shareholders, stableRatio, pageText, countTodo } from "./teian.js";
 import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
-import { profile, diagnose, keyFacts } from "./shindan.js";
+import { profile, diagnose, keyFacts, corpCore } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
@@ -671,6 +671,7 @@ $("go").onclick = async () => {
   fillChukei();
   readInputs();
   await loadOwnHist(ctx.code);
+  ctx.listedNames = await loadListed();
   // 「事業の状況」の四半期と今期予想は短信から入る。まだ読み込んでいなければ、ここで1回だけIRから取る。
   if (needTanshin()) {
     $("go").disabled = true;
@@ -922,6 +923,17 @@ function fillChukei() {
     (r.year ? ` 目標年度は「${esc(r.year)}」の行から。` : "") +
     `<br>見つかった数字（百万円、ROEは%）：` + r.cands.slice(0, 12).map((c) =>
       `${name[c.item]} ${c.value.toLocaleString("ja-JP")}（「${esc(c.line)}」）`).join("／");
+}
+
+/** 上場会社の名前の一覧（大株主の事業法人が上場会社かを見る）。1回だけ読む。 */
+let listedNames = null;
+async function loadListed() {
+  if (listedNames) return listedNames;
+  try {
+    const r = await fetch(DATA ? `${DATA}/names.json` : `/names.json`);
+    if (r.ok) listedNames = new Set((await r.json()).map(corpCore));
+  } catch { /* 無ければ照らさない */ }
+  return listedNames;
 }
 
 /** 所有者別・大株主の期ごとの記録（2回以上ある会社だけ配っている）。株主構成のページでも使うので ctx に持つ。 */

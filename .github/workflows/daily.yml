@@ -107,7 +107,8 @@ jobs:
           for i in 1 2 3; do
             git fetch -q origin main
             git reset -q --hard origin/main
-            cp "$tmp/docs_index.json" docs_index.json
+            # 索引は上書きせず足し合わせる（同じ時間帯に索引を遡る実行が足した分を消さないため）
+            python merge_index.py "$tmp/docs_index.json" docs_index.json
             rsync -a --delete "$tmp/data/" data/
             rsync -a --delete "$tmp/site/" site/
             git add -A docs_index.json data site

@@ -25,6 +25,10 @@ const MAX_MATERIAL = 60000;   // 貼り付け資料の上限。これを超え�
 const MAX_SLOTS = Number(process.env.DRAFT_MAX_SLOTS || 5);
 const EFFORT = process.env.DRAFT_EFFORT || "low";
 
+// 文の中に差し込む、1行で書かせる項目。
+const ONE_LINE = new Set(["mgmtSummary", "bizDriverShort", "chukeiShort", "growthArea", "storySlogan", "useShort",
+  "prevDriver", "outlookDriver", "recentDriver", "stockView", "growthView"]);
+
 // 下書きする項目。idは呼ぶ側と合わせる。
 // 「提案」「推奨」という言葉は使わない。資本政策の論点として書かせる。
 const SLOTS = {
@@ -362,6 +366,17 @@ export default async (req) => {
   } catch {
     return bad("下書きの形式を読み取れませんでした", 502);
   }
+
+  // 頼んだ項目だけを残す。モデルが候補を並べて「◯◯_final」のような鍵を足すことがあった（7048）。
+  // そのときは _final を採る。文の中に差し込む短い項目は、1行目だけにする（改行が入ると文が壊れる）。
+  const clean = {};
+  for (const id of want) {
+    let v = drafts[`${id}_final`] ?? drafts[id];
+    if (typeof v !== "string") continue;
+    if (ONE_LINE.has(id)) v = v.split(/\r?\n/).map((t) => t.trim()).find(Boolean) || "";
+    clean[id] = v.trim();
+  }
+  drafts = clean;
 
   const record = {
     code, method, drafts, model: MODEL,

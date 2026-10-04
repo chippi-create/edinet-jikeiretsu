@@ -514,8 +514,8 @@ async function fillGaiyo(my) {
   // 所有者別・大株主の推移。2期以上の記録がある会社だけ、期を横に並べた表に差し替える。
   if (ctx.sec?.oh) {
     try {
-      const r = await fetch(DATA ? `${DATA}/oh/${code}.json` : `/oh/${code}.json`);
-      const oh = ownerHistory(r.ok ? await r.json() : null);
+      const raw = await loadOwnHist(code);
+      const oh = ownerHistory(raw);
       if (my === gaiyoToken && oh) {
         const pt = (v) => v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "△" : "±"}${Math.abs(v * 100).toFixed(2)}`;
         const span = `${oh.heads[oh.heads.length - 1]}→${oh.heads[0]}`;
@@ -666,6 +666,7 @@ $("go").onclick = async () => {
   // 資料の欄はどの経路でも変わりうる（IRから読み込む・PDFを貼る・手で貼る）。
   // 入口ごとに呼ぶと漏れるので、組み立てる直前に必ず読み直す。
   readTanshin(true);
+  await loadOwnHist(ctx.code);
   // 「事業の状況」の四半期と今期予想は短信から入る。まだ読み込んでいなければ、ここで1回だけIRから取る。
   if (needTanshin()) {
     $("go").disabled = true;
@@ -883,6 +884,18 @@ ${j.text}`);
   $("irload2").textContent =
     `${picked.length}本を読み込みました（${$("material").value.length.toLocaleString()}字）。`;
   $("irload").disabled = false;
+}
+
+/** 所有者別・大株主の期ごとの記録（2回以上ある会社だけ配っている）。株主構成のページでも使うので ctx に持つ。 */
+async function loadOwnHist(code) {
+  if (!ctx?.sec?.oh) return null;
+  if (ctx.ownHist && ctx.ownHistCode === code) return ctx.ownHist;
+  try {
+    const r = await fetch(DATA ? `${DATA}/oh/${code}.json` : `/oh/${code}.json`);
+    const j = r.ok ? await r.json() : null;
+    if (ctx && ctx.code === code) { ctx.ownHist = j; ctx.ownHistCode = code; }
+    return j;
+  } catch { return null; }
 }
 
 /** 有報の直近期の翌期（＝今期）の短信が、資料の欄にまだ無いか。 */

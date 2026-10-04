@@ -306,8 +306,9 @@ def _sh_cells(rows):
     return [[r.get(k, "") for k in ("順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合")] for r in rows]
 
 
-def put_ownhist(sec, kijun, doc_id, own_rows, sh_rows):
-    """所有者別・大株主を基準日ごとに積む。同じ基準日は新しい書類で置き換える。"""
+def put_ownhist(sec, kijun, doc_id, own_rows, sh_rows, src="有価証券報告書"):
+    """所有者別・大株主を基準日ごとに積む。同じ基準日は新しい書類で置き換える。
+    src は書類の種類（有価証券報告書／半期報告書）。半期報告書には所有者別状況が無い。"""
     if not kijun or not (own_rows or sh_rows):
         return
     os.makedirs(OWNHIST_DIR, exist_ok=True)
@@ -317,7 +318,7 @@ def put_ownhist(sec, kijun, doc_id, own_rows, sh_rows):
         with open(path, encoding="utf-8") as fp:
             periods = json.load(fp).get("periods", [])
     periods = [x for x in periods if x.get("k") != kijun]
-    periods.append({"k": kijun, "d": doc_id, "own": _own_cells(own_rows), "sh": _sh_cells(sh_rows)})
+    periods.append({"k": kijun, "d": doc_id, "src": src, "own": _own_cells(own_rows), "sh": _sh_cells(sh_rows)})
     periods.sort(key=lambda x: x["k"], reverse=True)
     with open(path, "w", encoding="utf-8") as fp:
         json.dump({"periods": periods[:OWNHIST_KEEP]}, fp, ensure_ascii=False, separators=(",", ":"))
@@ -335,6 +336,49 @@ def seed_ownhist(own, sh, state):
         n += 1
     if n:
         log(f"■ 所有者別・大株主の期ごとの記録を {n}社 で積みはじめました")
+
+
+def fetch_hanki(index, state, codes, limit):
+    """半期報告書の大株主の状況を取る。最新の有報より後の半期報告書だけ（それより古い断面は要らない）。
+    取ったものは期ごとの記録（ownhist）に「半期報告書」として積む。"""
+    if limit <= 0:
+        return 0
+    latest = {}
+    for d in index["docs"].values():
+        sec = (d.get("secCode") or "")[:4]
+        if not sec or d.get("docTypeCode") not in ("120", "160"):
+            continue
+        key = (d.get("docTypeCode"), sec)
+        if (d.get("submitDateTime") or "") > (latest.get(key, {}).get("submitDateTime") or ""):
+            latest[key] = d
+    targets = codes or sorted({s for t, s in latest if t == "160"})
+    todo = []
+    for sec in targets:
+        h = latest.get(("160", sec))
+        y = latest.get(("120", sec))
+        if not h or state.get(sec, {}).get("半期") == h["docID"]:
+            continue
+        if y and (h.get("periodEnd") or "") <= (y.get("periodEnd") or ""):
+            continue
+        todo.append(sec)
+    if not todo:
+        return 0
+    log(f"■ 半期報告書の大株主: 対象 {len(todo)}社（今回 {min(limit, len(todo))}社）")
+    n = 0
+    for sec in todo[:limit]:
+        h = latest[("160", sec)]
+        kijun = (h.get("periodEnd") or "")[:10]
+        z = sections.fetch_zip(h["docID"])
+        if z is None:
+            log(f"  {sec} 半期 {kijun}: ZIPを取得できませんでした")
+            continue
+        blocks = sections.sections_of(z)
+        sh_rows = parse_shareholders(sections.tables_of(blocks.get("MajorShareholdersTextBlock", "")))
+        put_ownhist(sec, kijun, h["docID"], [], sh_rows, src="半期報告書")
+        state.setdefault(sec, {})["半期"] = h["docID"]
+        log(f"  {sec} 半期 {kijun}: 大株主{len(sh_rows)}名")
+        n += 1
+    return n
 
 
 def fetch_past(index, codes, years):
@@ -424,6 +468,7 @@ def main():
     log(f"■ 索引 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。")
+        fetch_hanki(index, state, codes, LIMIT)
         save_all(own, sh, of, biz, div, web, segs, state)
         return
     todo = pending[:LIMIT]
@@ -540,10 +585,13 @@ def main():
             save_all(own, sh, of, biz, div, web, segs, state)
             log(f"   （途中保存：{done}社）")
 
-        state[sec] = {"docID": doc["docID"], "版": SECTIONS_VERSION,
+        # 半期報告書を取った記録（"半期"）は残す
+        state[sec] = {**state.get(sec, {}), "docID": doc["docID"], "版": SECTIONS_VERSION,
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
+    # 残りの枠で半期報告書の大株主を取る
+    fetch_hanki(index, state, codes, LIMIT - done)
     n = save_all(own, sh, of, biz, div, web, segs, state)
     log("")
     log(f"■ 今回の取得: {done}社")

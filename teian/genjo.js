@@ -2,12 +2,12 @@
 //
 // ① 事業の状況：PL・BS・CF・株価指標を、通期実績（最大5期）・今期の四半期累計・今期予想・中計の順に1枚の表に並べる。
 //    見出しの一文は、直近四半期の進捗が前年と比べて順調か遅れているかと、中計の達成に要る伸び。
-// ② 資本効率と株主構成：ROE・自己資本比率・PBR・配当性向と、株主の顔ぶれ。
+// ② 株主構成：大株主上位10名（有報・半期報告書の直近2回）、所有者別状況（有報の直近2回）、推定オーナー比率。
 //
 // 判定は数字の比較だけで行う（前年同期の進捗率との差、中計に要る伸び率と過去の伸び率）。
 // 理由や背景は書かない。そこは【　】で空けて、会話の中で埋める。
 
-import { profile, diagnose, floatRules, looksLikeOwner } from "./shindan.js";
+import { profile, looksLikeOwner, holderKind, holderLabel, ownerEstimate } from "./shindan.js";
 import { quarterNo } from "./tanshin.js";
 import { asRatio } from "./shikin.js";
 
@@ -269,102 +269,97 @@ function leadBiz(pg, gap) {
   return parts.join("。");
 }
 
-// ---- ② 資本効率と株主構成 -------------------------------------------------
+// ---- ② 株主構成 -----------------------------------------------------------
+//
+// 大株主の上位10名（区分つき）を直近2回分（有報・半期報告書）、所有者別状況を有報の直近2回分並べ、
+// 創業家など推定のオーナー比率を添える。半期報告書には所有者別状況が無いので、所有者別は有報だけ。
+// 過去の回は期ごとの記録（/oh/{code}.json → ctx.ownHist）から取る。無ければ最新の有報だけ。
+
+const holderKey = (name) => String(name || "").normalize("NFKC").replace(/[(（]?常任代理人.*$/, "").replace(/[\s　]+/g, "");
+const ymOf = (k) => { const [y, m] = String(k || "").split("-"); return y && m ? `${y}/${Number(m)}` : String(k || "—"); };
+const srcShort = (s) => /半期/.test(s || "") ? "半期" : "有報";
+
+/** 大株主の行 [順位, 氏名, 住所, 株数, 単位, 比率%] を読む。 */
+function holderList(rows) {
+  return (rows || []).map((r) => {
+    const name = String(r[1] || "").replace(/\s+/g, " ").trim();
+    const kind = holderKind(name);
+    const ratio = num(r[5]) === null ? null : num(r[5]) / 100;
+    return { name, kind, label: holderLabel(name, kind), ratio, key: holderKey(name) };
+  }).filter((h) => h.name);
+}
+
+/** 期ごとの記録から、大株主のある回・所有者別のある回をそれぞれ新しい順に2つ。 */
+export function holderPeriods(ctx) {
+  const ps = (ctx.ownHist?.periods || []).slice().sort((a, b) => String(b.k).localeCompare(String(a.k)));
+  const sec = ctx.sec || {};
+  const now = { k: sec.k?.sh || sec.k?.own || "", src: "有価証券報告書", sh: sec.sh || [], own: sec.own || [] };
+  const shP = ps.filter((p) => (p.sh || []).length).slice(0, 2);
+  const ownP = ps.filter((p) => (p.own || []).length).slice(0, 2);
+  return {
+    sh: shP.length ? shP : (now.sh.length ? [now] : []),
+    own: ownP.length ? ownP : (now.own.length ? [now] : []),
+  };
+}
 
 export function pageCapital(ctx) {
   const pf = profile(ctx);
-  const kessan = (ctx.kessan || "").replace(/^0/, "").replace("月期", "");
-  const by = pf.byYear;
+  const per = holderPeriods(ctx);
+  const head = (p) => `${ymOf(p.k)}（${srcShort(p.src)}）`;
 
+  // 大株主：直近の回の上位10名。前の回の比率を名前で引く（上位10名外なら「—」）。
+  const [cur, prev] = per.sh;
+  const top = holderList(cur?.sh).slice(0, 10);
+  const prevMap = new Map(holderList(prev?.sh).map((h) => [h.key, h.ratio]));
+  const shRows = top.map((h) => [h.label,
+    looksLikeOwner(h) ? `${h.kind}（${h.ratio >= 0.5 ? "親会社か" : "資産管理会社か"}）` : h.kind,
+    pct(h.ratio, 2), ...(prev ? [pct(prevMap.get(h.key) ?? null, 2)] : [])]);
+
+  // 所有者別：まとめた5区分。外国は法人と個人を足す。
+  const cat = (rows, re) => {
+    const rs = (rows || []).filter((r) => re.test(String(r[0] || "")) && !/^計$|単元未満/.test(String(r[0] || "")));
+    const vals = rs.map((r) => num(r[3])).filter((v) => v !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / 100 : null;
+  };
+  const CATS = [["金融機関", /^金融機関/], ["証券会社", /金融商品取引業者|証券会社/], ["事業法人等", /その他の法人/],
+    ["外国法人等", /外国/], ["個人その他", /^個人/]];
+  const ownRows = CATS.map(([label, re]) => [label, ...per.own.map((p) => pct(cat(p.own, re)))]);
+
+  // 推定オーナー比率（直近の大株主から）
+  const est = ownerEstimate(cur?.sh, ctx.sec?.of, ctx.basis);
   const items = [];
-  if (pf.roe !== null) {
-    items.push(`ROEは${pct(pf.roe)}` + (pf.roe < 0.08 ? "で、一般に意識される8%を下回る。" : "。") +
-      (ctx.chukei?.roe ? `中計目標は${pct(ctx.chukei.roe)}。` : ""));
-  }
-  if (pf.eqRatio !== null) {
-    items.push(`自己資本比率は${pct(pf.eqRatio)}、ネットキャッシュ（現預金−有利子負債）は` +
-      `${pf.netCash === null ? "—" : `${(pf.netCash / 1e8).toFixed(1)}億円`}。`);
-  }
-  if (pf.pbr !== null) {
-    items.push(`PBRは${pf.pbr.toFixed(2)}倍（${pf.priceBasis}）` + (pf.pbr < 1 ? "で1倍を下回る。" : "。"));
-  }
-  if (pf.holdings) {
-    const h = pf.holdings;
-    items.push(h.total > 0
-      ? `政策保有株は${(h.total / 1e8).toFixed(1)}億円（純資産の${pct(h.toEquity)}` +
-        (h.count !== null ? `、上場${h.count}銘柄` : "") + "）" +
-        (h.toEquity >= 0.2 ? "で、純資産の20%を超える。" : "。") +
-        (h.sold ? `当期に${(h.sold / 1e8).toFixed(1)}億円を売却。` : "")
-      : "政策保有株は保有していない（有報の開示上）。");
-    if (h.pure > 0) {
-      items.push(`ほかに純投資目的の上場株を${(h.pure / 1e8).toFixed(1)}億円（純資産の${pct(h.pureToEquity)}）保有。`);
-    }
-  }
-  if (pf.float) {
-    // 市場区分が選ばれていなければ、どの基準を下回るかは書かない（菊池はスタンダード上場で、
-    // 「プライムの基準を下回る」と書くと事実と違う印象になる）。
-    const seg = ctx.market?.segment || "";
-    const r = seg ? floatRules(seg)[0] : null;
-    const below = r && (pf.float.ratio < r.ratio || (pf.float.cap !== null && pf.float.cap < r.cap));
-    items.push(`流通株式比率は推定${pct(pf.float.ratio)}` +
-      (pf.float.cap !== null ? `、流通時価総額は推定${(pf.float.cap / 1e8).toFixed(0)}億円` : "") +
-      (r ? `（${seg}の上場維持基準は${pct(r.ratio, 0)}・${r.cap / 1e8}億円${below ? "で、下回る水準" : ""}）。` : "。"));
-  }
-  // 信託口と証券会社（個人の信用取引などの預かり）は、実質の持ち主ではないので外す。
-  const top = pf.holders.filter((h) => h.kind !== "信託・カストディ" && h.kind !== "証券会社").slice(0, 3);
   if (top.length) {
-    items.push("主な株主は" + top.map((h) => `${h.label}（${pct(h.ratio, 1)}）`).join("、") + "。");
+    items.push(`推定オーナー比率は${pct(est.ratio)}` +
+      "（上位10名の個人、資産管理会社・親会社らしい法人、上位10名外の役員の持株の合計）。");
+    for (const p of est.parts) items.push(`${p.label}（${p.why}）${pct(p.ratio, 2)}`);
+    if (est.officers) items.push(`上位10名外の役員${est.officers.count}名の持株 ${pct(est.officers.ratio, 2)}`);
+    if (!est.parts.length && !est.officers) items.push("上位10名に個人・資産管理会社らしい株主は見当たらない。");
   }
+  if (pf.float) items.push(`流通株式比率は推定${pct(pf.float.ratio)}（${per.own[0] ? ymOf(per.own[0].k) : "直近"}の有報から）。`);
 
-  // 所有者別はまとめて短くする（外国は法人と個人を足す）
-  const cat = (re) => pf.own.filter((o) => re.test(o.category)).reduce((a, o) => a + o.ratio, 0);
-  const ownRows = pf.own.length ? [
-    ["金融機関", pct(cat(/^金融機関/))],
-    ["証券会社", pct(cat(/金融商品取引業者|証券会社/))],
-    ["事業法人等", pct(cat(/その他の法人/))],
-    ["外国法人等", pct(cat(/外国/))],
-    ["個人その他", pct(cat(/^個人/))],
-  ] : [];
-
-  const issues = diagnose(ctx, pf);
+  const first = pf.top;
   return {
-    no: 1, title: "御社の現状②　資本効率と株主構成",
-    lead: issues.length ? `数字から見える論点：${issues.slice(0, 2).map((i) => i.title.split("：")[0]).join("・")}`
-      : TODO("資本効率と株主構成の現状を一文で"),
-    blocks: [{ items }],
+    no: 1, title: "株主構成",
+    lead: first ? `筆頭株主は${first.label}（${pct(first.ratio, 1)}）。推定オーナー比率は${pct(est.ratio)}`
+      : TODO("株主構成の現状を一文で"),
+    layout: "wideTable",
+    blocks: [{ head: "推定オーナー比率", items }],
     tables: [
-      {
-        caption: "資本効率の推移",
-        head: ["", ...by.map((b) => `${b.year}/${kessan}`)],
-        rows: [
-          ["ROE", ...by.map((b) => pct(b.roe))],
-          ["自己資本比率", ...by.map((b) => pct(b.eqRatio))],
-          ["配当性向", ...by.map((b) => pct(b.payout))],
-          ["PBR（期末）", ...by.map((b) => b.pbr === null ? "—" : `${b.pbr.toFixed(2)}倍`)],
-          ["現預金（億円）", ...by.map((b) => b.cash === null ? "—" : (b.cash / 1e8).toFixed(1))],
-          ["ネットキャッシュ（億円）", ...by.map((b) => b.netCash === null ? "—" : (b.netCash / 1e8).toFixed(1))],
-        ].filter((r) => r.slice(1).some((c) => c !== "—")),
-      },
-      ownRows.length ? {
-        caption: "株主構成（所有者別・有報）",
-        head: ["区分", "比率"],
-        rows: [...ownRows,
-          ["流通株式比率（推定）", pf.float ? pct(pf.float.ratio) : "—"]],
-        pick: 5,
+      cur ? {
+        caption: "大株主の状況（上位10名）",
+        head: ["株主名", "区分", head(cur), ...(prev ? [head(prev)] : [])],
+        rows: shRows,
       } : null,
-      pf.holders.length ? {
-        caption: "大株主上位5位",
-        head: ["株主名", "区分", "比率"],
-        rows: pf.holders.slice(0, 5).map((h) => [h.label,
-          looksLikeOwner(h) ? `${h.kind}（資産管理会社か）` : h.kind, pct(h.ratio, 2)]),
+      per.own.length ? {
+        caption: "所有者別状況",
+        head: ["区分", ...per.own.map(head)],
+        rows: ownRows,
       } : null,
     ].filter(Boolean),
     notes: [
-      "PBR（期末）＝有報の期末株価（PER×EPS）÷BPS。赤字の期はPERが出ないため空欄。" +
-      "ネットキャッシュ＝現預金−有利子負債。有利子負債は有報に2期分しか無いため、それ以前は空欄。",
-      "流通株式比率は、自己株式・役員・10%以上の大株主・事業法人等・銀行保険の保有を除いた推定。" +
-      "東証の算定とは一致しないので、会社の開示で確かめる。",
-      "区分は株主名からの推定（信託口は投資家の預かりとして「信託・カストディ」）。",
+      "出典：有価証券報告書、半期報告書。比率は自己株式を除く発行済株式数に対する割合。前の回で上位10名に入っていない株主は「—」。" +
+      "半期報告書には所有者別状況が載らないため、所有者別は有報の2回分。",
+      "区分と推定オーナー比率は株主名からの推定（親族関係・資産管理会社かどうかは会社の開示で確かめる）。持株会・信託口・金融機関は含めない。",
     ],
   };
 }

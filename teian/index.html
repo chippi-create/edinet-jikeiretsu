@@ -1014,6 +1014,13 @@ const SLOT_GROUPS = [
 $("ai").onclick = async () => {
   if (!ctx) { alert("先に会社を読み込んでください"); return; }
   $("ai").disabled = true;
+  // 今期予想の背景・足元の要因は短信を読んで書かせるので、先に今期の短信を入れておく。
+  readTanshin(true);
+  if (needTanshin()) {
+    $("aimsg").textContent = "今期の決算短信をIRから読み込んでいます…";
+    await autoTanshin();
+    readTanshin(true);
+  }
   $("aimsg").textContent = "下書きを作っています（1分ほどかかります）…";
   const material = $("material").value.slice(0, 60000);
   const refresh = $("refresh").checked;

@@ -15,6 +15,7 @@ import { trendOf } from "./kabuka.js";
 import { jigyoMid } from "./jigyo.js";
 import { holderLabel } from "./shindan.js";
 import { pageBackup } from "./backup.js";
+import { pageKeiei } from "./keiei.js";
 import { pageSimEnd, pageSimMonthly, pageSimAfter } from "./sim2.js";
 import { pageRonten, pageStory } from "./ronten.js";
 
@@ -170,7 +171,7 @@ export function buildProposal(ctx) {
   pages.push(...pageCash(ctx));
   pages.push(pageStock(ctx));
   // 既存の提案書にあるページ（写真で受け取ったもの）。財務シミュレーションは赤字の会社だけ。
-  // 「主な経営指標の状況」は P1「事業の状況」と表が重なるので外した（本人の指定）。所見はP1の左に移した。
+  pages.push(pageKeiei(ctx));
   pages.push(pageSimEnd(ctx));
   pages.push(pageSimMonthly(ctx));
   pages.push(pageGrowth(ctx));

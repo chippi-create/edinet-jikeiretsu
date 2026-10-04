@@ -9,8 +9,7 @@
 
 import { profile, looksLikeOwner, holderKind, holderLabel, ownerEstimate } from "./shindan.js";
 import { quarterNo } from "./tanshin.js";
-import { asRatio, segUnit } from "./shikin.js";
-import { keieiStory } from "./keiei.js";
+import { asRatio } from "./shikin.js";
 
 const TODO = (w) => `【${w}】`;
 const num = (v) => {
@@ -248,17 +247,10 @@ export function pageBiz(ctx) {
     !term?.forecast ? "今期予想" : null,
   ].filter(Boolean);
 
-  // 左の文章欄：事業 → 成長性 → 資金需要 → 借入とエクイティの比較（もとは「主な経営指標の状況」の所見）。
-  const sec = ctx.sec || {};
-  const seg0 = (sec.seg || []).map((s) => [String(s[0] || "").trim(), num(s[1])]).filter((s) => s[0] && s[1] !== null);
-  const sunit = segUnit(seg0.map((x) => x[1]), get("売上高", lastY));
-  const story = keieiStory(ctx, { years, get, seg: seg0.map(([n, v]) => [n, v * sunit]), pf: profile(ctx) });
-
   return {
     no: 1, title: "事業の状況",
-    lead: leadBiz(pg, gap) || story.lead || TODO("業績の現状を一文で"),
+    lead: leadBiz(pg, gap) || TODO("業績の現状を一文で"),
     layout: "fullTable",
-    blocks: [{ items: story.items }],
     tables: [{ caption: "", head: ["（百万円）", ...cols.map((c) => c.head)], groups, rows, section: true }],
     notes: [
       "出典：有価証券報告書、決算短信" + (ck ? "、中期経営計画" : "") + "。百万円未満切り捨て。伸び率は四半期が前年同期比、予想が前期比。" +

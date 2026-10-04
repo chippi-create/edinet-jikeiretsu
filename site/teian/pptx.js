@@ -206,13 +206,7 @@ function putTable(s, t, x, y, w, fontSize = 9) {
 function fullTable(s, p, top) {
   const t = (p.tables || [])[0];
   if (!t) return;
-  // 左に文章の欄（3.5インチ）。文章が無くても欄は空けておく（本人が書き足す）。
-  const TX = 3.5, GAP = 0.15;
-  const lines = flatten(p.blocks).map((r) => ({ text: r.text, options: { ...r.options, fontSize: 9 } }));
-  s.addText(lines.length ? lines : [{ text: "" }], { x: 0.48, y: top, w: TX, h: notesTop(p) - 0.1 - top,
-    fontFace: FONT, color: FG, valign: "top", lineSpacingMultiple: 1.1, line: { color: GRAY, width: 0.75 } });
-  const X = 0.48 + TX + GAP;
-  const W = 12.4 - TX - GAP, first = 1.75, n = t.head.length - 1;
+  const W = 12.4, first = 2.3, n = t.head.length - 1;
   const colW = [first, ...Array(n).fill((W - first) / Math.max(1, n))];
   const isSection = (r) => r.slice(1).every((c) => c === "");
   const rows = [
@@ -224,7 +218,7 @@ function fullTable(s, p, top) {
   // 下端（注記の上）に収まる行の高さにする。
   // PowerPointは文字の大きさより低い行にできないので、上下の余白を0にして7ptに落とす。
   const rowH = Math.min(0.2, (notesTop(p) - 0.1 - top) / rows.length);
-  s.addTable(rows, { x: X, y: top, w: W, colW, fontSize: rowH < 0.16 ? 7 : 8, color: FG, fontFace: FONT,
+  s.addTable(rows, { x: 0.48, y: top, w: W, colW, fontSize: rowH < 0.16 ? 7 : 8, color: FG, fontFace: FONT,
     valign: "middle", autoPage: false, rowH, margin: [0, 0.04, 0, 0.04], border: { type: "solid", color: GRAY, pt: 0.5 } });
 }
 

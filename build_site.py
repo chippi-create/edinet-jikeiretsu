@@ -270,6 +270,26 @@ def main():
     # 要約を作るときだけ読む材料。サイトの表示には使わない。
     copy_per_company("context", "context", ".json")
 
+    # 所有者別・大株主の期ごとの記録。2期以上ある会社だけ配る（1期なら最新の表と同じ）。
+    # 区分名は最新の表と同じようにそろえる。
+    has_oh = set()
+    ohsrc = os.path.join(HERE, "data", "ownhist")
+    if os.path.isdir(ohsrc):
+        ohdst = os.path.join(SITE, "oh")
+        os.makedirs(ohdst, exist_ok=True)
+        for fn in os.listdir(ohsrc):
+            if not fn.endswith(".json"):
+                continue
+            with open(os.path.join(ohsrc, fn), encoding="utf-8") as f:
+                periods = json.load(f).get("periods", [])
+            if len(periods) < 2:
+                continue
+            for x in periods:
+                x["own"] = [[norm_category(r[0])] + r[1:] for r in x.get("own", [])]
+            with open(os.path.join(ohdst, fn), "w", encoding="utf-8") as f:
+                json.dump({"periods": periods}, f, ensure_ascii=False, separators=(",", ":"))
+            has_oh.add(fn[:-5])
+
     # 記述部分は別ファイル。タブを開いたときだけ取りに行く。
     os.makedirs(os.path.join(SITE, "s"), exist_ok=True)
     secs = load_sections()
@@ -286,6 +306,8 @@ def main():
             obj["kb"] = 1
         if sec in has_hist:
             obj["h"] = 1
+        if sec in has_oh:
+            obj["oh"] = 1
         sbuckets[bucket_of(sec)][sec] = obj
     for b, obj in sbuckets.items():
         with open(os.path.join(SITE, "s", f"{b}.json"), "w", encoding="utf-8") as f:

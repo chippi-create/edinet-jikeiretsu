@@ -9,7 +9,7 @@
 // 数字の表はここで機械的に作る。文章のパートは /api/yuho と /api/summarize の要約を画面で差し込む
 // （ここでは「どのパートを取りに行くか」だけを返す）。
 
-import { holderLabel, profile } from "./shindan.js";
+import { holderKind, holderLabel, profile } from "./shindan.js";
 import { asRatio, segUnit } from "./shikin.js";
 
 // 有報の表は負の数を「△28,705」と書く。△・▲を負の符号として読む。
@@ -178,4 +178,53 @@ export function officerRows(of) {
     const mult = unit.includes("千") ? 1000 : unit.includes("百") ? 100 : 1;
     return [role, holderLabel(name, "個人"), born, sh === null ? "—" : (sh * mult).toLocaleString("ja-JP")];
   });
+}
+
+// ---- 所有者別状況・大株主の期ごとの推移（/oh/{code}.json）-------------------
+
+/**
+ * 期ごとの記録を、期を横に並べた表にする（新しい期が左）。
+ *   heads   … ["2026/3", "2025/3", ...]
+ *   holders … 直近期の順位順。前の期だけにいた株主は後ろに付ける。[{label, kind, ratios[], diff}]
+ *   own     … 所有者別の区分ごとの比率。[{category, ratios[], diff}]
+ * diff は最も新しい期と最も古い期の差（ポイント、どちらか欠けると null）。
+ */
+export function ownerHistory(oh, n = 3) {
+  const periods = (oh?.periods || []).slice().sort((a, b) => String(b.k).localeCompare(String(a.k))).slice(0, n);
+  if (periods.length < 2) return null;
+  const heads = periods.map((p) => { const [y, m] = String(p.k).split("-"); return `${y}/${Number(m)}`; });
+  // 同じ株主か：表記ゆれ（空白・全角半角・常任代理人の書き方）を落として比べる。
+  const key = (name) => String(name || "").normalize("NFKC").replace(/[(（]?常任代理人.*$/, "").replace(/[\s　]+/g, "");
+  const ratio = (v) => { const x = num(v); return x === null ? null : x / 100; };
+  const diff = (rs) => rs[0] !== null && rs[rs.length - 1] !== null ? rs[0] - rs[rs.length - 1] : null;
+
+  const holders = new Map();
+  periods.forEach((p, i) => {
+    for (const r of p.sh || []) {
+      const name = String(r[1] || "").replace(/\s+/g, " ").trim();
+      if (!name) continue;
+      const k = key(name);
+      if (!holders.has(k)) {
+        holders.set(k, { label: holderLabel(name), kind: holderKind(name), ratios: periods.map(() => null), first: i });
+      }
+      const h = holders.get(k);
+      if (h.ratios[i] === null) h.ratios[i] = ratio(r[5]);
+    }
+  });
+  const hs = [...holders.values()]
+    .sort((a, b) => a.first - b.first || (b.ratios[a.first] ?? 0) - (a.ratios[a.first] ?? 0))
+    .map(({ first, ...h }) => ({ ...h, diff: diff(h.ratios), dropped: first > 0 }));
+
+  const cats = new Map();
+  periods.forEach((p, i) => {
+    for (const r of p.own || []) {
+      const c = String(r[0] || "").trim();
+      if (!c || /^計$/.test(c) || /単元未満/.test(c)) continue;
+      if (!cats.has(c)) cats.set(c, periods.map(() => null));
+      if (cats.get(c)[i] === null) cats.get(c)[i] = ratio(r[3]);
+    }
+  });
+  const own = [...cats].filter(([, rs]) => rs.some((v) => v !== null))
+    .map(([category, ratios]) => ({ category, ratios, diff: diff(ratios) }));
+  return { heads, holders: hs, own };
 }

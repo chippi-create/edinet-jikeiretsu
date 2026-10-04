@@ -227,7 +227,7 @@ import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts } from "./shindan.js";
 import { jigyoBlock } from "./jigyo.js";
-import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows } from "./gaiyo.js";
+import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
 
 const $ = (id) => document.getElementById(id);
@@ -452,9 +452,9 @@ function renderGaiyo() {
       `<div class="part"><h4>新株予約権等の状況</h4><div class="ai wait" id="yh-rights">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
       `<div class="part"><h4>自己株式の保有と取得の状況</h4><div class="ai wait" id="yh-acq">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
       TEXT_PARTS.filter((p) => p.chapter === 4).map(partBox).join("") +
-      (st.top.length ? `<div class="part"><h4>大株主の状況（上位10名）</h4>${tbl(["株主名", "区分", "比率"],
+      (st.top.length ? `<div class="part" id="yh-sh"><h4>大株主の状況（上位10名）</h4>${tbl(["株主名", "区分", "比率"],
         st.top.map((h) => [h.label, h.kind, pctS(h.ratio, 2)]))}</div>` : "") +
-      (st.own.length ? `<div class="part"><h4>所有者別状況</h4>${tbl(["区分", "比率"], st.own.map((o) => [o.category, pctS(o.ratio)]))}</div>` : "") +
+      (st.own.length ? `<div class="part" id="yh-own"><h4>所有者別状況</h4>${tbl(["区分", "比率"], st.own.map((o) => [o.category, pctS(o.ratio)]))}</div>` : "") +
       `<div class="part"><h4>役員の状況（${st.officerCount}名）</h4>` +
         (st.officerCount ? tbl(["役職", "氏名", "生年月日", "所有株式数（株）"], officerRows(ctx.sec?.of)) : `<p class="ai">—</p>`) + `</div>` +
       `<div class="part"><h4>監査法人</h4><div class="ai wait" id="yh-audit">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>` +
@@ -500,6 +500,27 @@ async function fillGaiyo(my) {
         if (t) t.onclick = (e) => { e.preventDefault(); $("yh-hist").querySelectorAll("tr.minor").forEach((r) => r.classList.remove("hide")); t.remove(); };
       }
     } catch { put("yh-hist", "沿革を読み込めなかった。"); }
+  }
+  // 所有者別・大株主の推移。2期以上の記録がある会社だけ、期を横に並べた表に差し替える。
+  if (ctx.sec?.oh) {
+    try {
+      const r = await fetch(DATA ? `${DATA}/oh/${code}.json` : `/oh/${code}.json`);
+      const oh = ownerHistory(r.ok ? await r.json() : null);
+      if (my === gaiyoToken && oh) {
+        const pt = (v) => v === null ? "—" : `${v > 0 ? "+" : v < 0 ? "△" : "±"}${Math.abs(v * 100).toFixed(2)}`;
+        const span = `${oh.heads[oh.heads.length - 1]}→${oh.heads[0]}`;
+        const shEl = $("yh-sh");
+        if (shEl) shEl.innerHTML = `<h4>大株主の状況（上位10名・${oh.heads.length}期の推移）</h4>` +
+          tbl(["株主名", "区分", ...oh.heads, `増減（pt）`],
+            oh.holders.map((h) => [h.label + (h.dropped ? "（直近は上位外）" : ""), h.kind,
+              ...h.ratios.map((v) => pctS(v, 2)), pt(h.diff)])) +
+          `<p class="note">増減は${span}。「—」はその期の上位10名に入っていない（持株が無いとは限らない）。</p>`;
+        const ownEl = $("yh-own");
+        if (ownEl) ownEl.innerHTML = `<h4>所有者別状況（${oh.heads.length}期の推移）</h4>` +
+          tbl(["区分", ...oh.heads, `増減（pt）`], oh.own.map((o) => [o.category, ...o.ratios.map((v) => pctS(v, 2)), pt(o.diff)])) +
+          `<p class="note">増減は${span}。</p>`;
+      }
+    } catch { /* 最新の表のまま */ }
   }
   // 株式まわり（関係会社・新株予約権・自己株式・監査法人）
   if (ctx.sec?.kb) {

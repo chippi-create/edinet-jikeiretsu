@@ -26,6 +26,9 @@ on:
       codes:
         description: "証券コード（カンマ区切り）。入れるとその会社だけを取り直す"
         default: ""
+      past_years:
+        description: "証券コードを入れたとき、所有者別・大株主を前の期から何期ぶん取るか（0なら取らない）"
+        default: "2"
 
 permissions:
   contents: write
@@ -74,6 +77,7 @@ jobs:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           LIMIT: ${{ inputs.sections_limit || '600' }}
           SEC_CODES: ${{ inputs.codes }}
+          PAST_YEARS: ${{ inputs.past_years || '0' }}
 
       - name: build site
         run: python build_site.py

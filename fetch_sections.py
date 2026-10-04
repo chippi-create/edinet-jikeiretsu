@@ -52,6 +52,13 @@ SECTIONS_VERSION = "2026-10-04c 関係会社・新株予約権・自己株式・
 KABU_DIR = os.path.join(DATA_DIR, "kabu")
 WEBSITES = os.path.join(DATA_DIR, "websites.csv")
 SEGMENTS = os.path.join(DATA_DIR, "segments.csv")
+# 所有者別状況・大株主の期ごとの記録。会社ごとのファイル。
+#   {"periods": [{"k": 基準日, "d": docID, "own": [[区分, 株主数, 単元, 割合]], "sh": [[順位, 氏名, 住所, 株数, 単位, 割合]]}]}
+# ownership.csv / shareholders.csv は最新の1期だけを持つ（上書き）。こちらは基準日ごとに積む。
+OWNHIST_DIR = os.path.join(DATA_DIR, "ownhist")
+OWNHIST_KEEP = 5
+# 証券コード指定のときだけ、前の期の有報からも所有者別・大株主を取る（何期さかのぼるか）。
+PAST_YEARS = int(os.environ.get("PAST_YEARS", "0") or 0)
 # 要約を書くための材料。事業の内容だけでは仕入や販売先が分からないので、
 # 経営者による分析・主要な設備・主要な顧客も渡す。1社1万字を超えるため会社ごとに分ける。
 CONTEXT_DIR = os.path.join(DATA_DIR, "context")
@@ -291,6 +298,88 @@ def save_rows(path, fields, rows):
     return len(flat)
 
 
+def _own_cells(rows):
+    return [[r.get("区分", ""), r.get("株主数", ""), r.get("所有株式数_単元", ""), r.get("割合", "")] for r in rows]
+
+
+def _sh_cells(rows):
+    return [[r.get(k, "") for k in ("順位", "氏名又は名称", "住所", "所有株式数", "単位", "割合")] for r in rows]
+
+
+def put_ownhist(sec, kijun, doc_id, own_rows, sh_rows):
+    """所有者別・大株主を基準日ごとに積む。同じ基準日は新しい書類で置き換える。"""
+    if not kijun or not (own_rows or sh_rows):
+        return
+    os.makedirs(OWNHIST_DIR, exist_ok=True)
+    path = os.path.join(OWNHIST_DIR, f"{sec}.json")
+    periods = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fp:
+            periods = json.load(fp).get("periods", [])
+    periods = [x for x in periods if x.get("k") != kijun]
+    periods.append({"k": kijun, "d": doc_id, "own": _own_cells(own_rows), "sh": _sh_cells(sh_rows)})
+    periods.sort(key=lambda x: x["k"], reverse=True)
+    with open(path, "w", encoding="utf-8") as fp:
+        json.dump({"periods": periods[:OWNHIST_KEEP]}, fp, ensure_ascii=False, separators=(",", ":"))
+
+
+def seed_ownhist(own, sh, state):
+    """いま持っている最新の1期を、まだ記録のない会社だけ積みはじめる（取り直しは不要）。"""
+    n = 0
+    for sec in set(own) | set(sh):
+        if os.path.exists(os.path.join(OWNHIST_DIR, f"{sec}.json")):
+            continue
+        rows = own.get(sec) or sh.get(sec) or []
+        kijun = rows[0].get("基準日", "") if rows else ""
+        put_ownhist(sec, kijun, state.get(sec, {}).get("docID", ""), own.get(sec, []), sh.get(sec, []))
+        n += 1
+    if n:
+        log(f"■ 所有者別・大株主の期ごとの記録を {n}社 で積みはじめました")
+
+
+def fetch_past(index, codes, years):
+    """指定した会社の、前の期の有報から所有者別・大株主だけを取る。"""
+    by_sec = {}
+    for d in index["docs"].values():
+        sec = (d.get("secCode") or "")[:4]
+        if sec in codes and d.get("docTypeCode") == "120":
+            by_sec.setdefault(sec, []).append(d)
+    for sec in codes:
+        docs = sorted(by_sec.get(sec, []), key=lambda x: x.get("submitDateTime") or "", reverse=True)
+        # 同じ期の有報が2本ある（決算期変更など）ときは新しい方だけ
+        seen, past = set(), []
+        for d in docs:
+            pe = (d.get("periodEnd") or "")[:10]
+            if pe and pe not in seen:
+                seen.add(pe)
+                past.append(d)
+        past = past[1:1 + years]
+        have = set()
+        hp = os.path.join(OWNHIST_DIR, f"{sec}.json")
+        if os.path.exists(hp):
+            with open(hp, encoding="utf-8") as fp:
+                have = {x.get("k") for x in json.load(fp).get("periods", [])}
+        if len(past) < years:
+            log(f"  {sec}: 索引にある前の期の有報は {len(past)}本"
+                f"（索引は2024年9月以降。それより前は edinet-index で遡ると取れる）")
+        for d in past:
+            kijun = (d.get("periodEnd") or "")[:10]
+            if kijun in have:
+                log(f"  {sec} {kijun}: 取得済み")
+                continue
+            z = sections.fetch_zip(d["docID"])
+            if z is None:
+                log(f"  {sec} {kijun}: ZIPを取得できませんでした")
+                continue
+            blocks = sections.sections_of(z)
+            o = parse_ownership(sections.tables_of(blocks.get("ShareholdingByShareholderCategoryTextBlock", "")))
+            own_rows = [{"区分": k, "株主数": v.get("株主数", ""), "所有株式数_単元": v.get("単元", ""),
+                         "割合": v.get("割合", "")} for k, v in o.items()]
+            sh_rows = parse_shareholders(sections.tables_of(blocks.get("MajorShareholdersTextBlock", "")))
+            put_ownhist(sec, kijun, d["docID"], own_rows, sh_rows)
+            log(f"  {sec} {kijun}（前の期）: 所有者別{len(own_rows)}区分 / 大株主{len(sh_rows)}名")
+
+
 def main():
     if not fetch2.API_KEY:
         raise SystemExit("EDINET_API_KEY が設定されていません。")
@@ -313,9 +402,15 @@ def main():
     log(f"■ 蓄積の現状: 事業 {len(biz)}社 / 配当 {len(div)}社 / リスク {nrisk}社 "
         f"/ 所有者別 {len(own)}社 / 大株主 {len(sh)}社 / 役員 {len(of)}社")
 
+    seed_ownhist(own, sh, state)
+
     # 証券コードを指定すると、その会社だけを取り直す。
     # 全社の一巡は7日かかるので、いま見たい会社を先に通すための逃げ道。
     codes = [c.strip() for c in os.environ.get("SEC_CODES", "").split(",") if c.strip()]
+    # 前の期の所有者別・大株主は、会社を指定したときだけ取る（全社でやると2週間かかる）。
+    if codes and PAST_YEARS > 0:
+        log(f"■ 前の期の所有者別・大株主: {PAST_YEARS}期さかのぼる")
+        fetch_past(index, codes, PAST_YEARS)
     picked = fetch2.pick_docs(index, targets=codes or None, quiet=True)
     if codes:
         log(f"■ 証券コード指定: {codes}")
@@ -329,6 +424,7 @@ def main():
     log(f"■ 索引 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。")
+        save_all(own, sh, of, biz, div, web, segs, state)
         return
     todo = pending[:LIMIT]
     log(f"■ 今回の対象: {len(todo)}社（上限 {LIMIT}社）")
@@ -400,6 +496,7 @@ def main():
         s = parse_shareholders(sections.tables_of(
             blocks.get("MajorShareholdersTextBlock", "")))
         sh[sec] = [dict(r, 証券コード=sec, 会社名=name, 基準日=kijun) for r in s]
+        put_ownhist(sec, kijun, doc["docID"], own[sec], sh[sec])
 
         f = parse_officers(sections.tables_of(
             blocks.get("InformationAboutOfficersTextBlock", "")))

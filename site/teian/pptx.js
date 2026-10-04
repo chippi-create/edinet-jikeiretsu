@@ -84,6 +84,7 @@ export function buildPptx(pages, PptxGenJS) {
     }
 
     if (p.layout === "wideTable") { wideTable(s, p, y); footer(s, p); continue; }
+    if (p.layout === "fullTable") { fullTable(s, p, y); footer(s, p); continue; }
     if (p.layout === "stack") { stack(s, p, y); footer(s, p); continue; }
     if (p.layout === "story") { story(s, p, y); footer(s, p); continue; }
     if (p.layout === "plans") { plans(s, p, y); footer(s, p); continue; }
@@ -196,6 +197,35 @@ function putTable(s, t, x, y, w, fontSize = 9) {
     top += 0.24;
   }
   return top;
+}
+
+/**
+ * 全幅の大きな表1つ（事業の状況）。列が多いので、1列目だけ広く取り、残りは等分。
+ * groups があれば、見出しの上に「通期実績／四半期累計／今期予想／中計」のくくりの行を置く。
+ */
+function fullTable(s, p, top) {
+  const t = (p.tables || [])[0];
+  if (!t) return;
+  // 左に文章の欄（3.5インチ）。文章が無くても欄は空けておく（本人が書き足す）。
+  const TX = 3.5, GAP = 0.15;
+  const lines = flatten(p.blocks).map((r) => ({ text: r.text, options: { ...r.options, fontSize: 9 } }));
+  s.addText(lines.length ? lines : [{ text: "" }], { x: 0.48, y: top, w: TX, h: notesTop(p) - 0.1 - top,
+    fontFace: FONT, color: FG, valign: "top", lineSpacingMultiple: 1.1, line: { color: GRAY, width: 0.75 } });
+  const X = 0.48 + TX + GAP;
+  const W = 12.4 - TX - GAP, first = 1.75, n = t.head.length - 1;
+  const colW = [first, ...Array(n).fill((W - first) / Math.max(1, n))];
+  const isSection = (r) => r.slice(1).every((c) => c === "");
+  const rows = [
+    ...(t.groups ? [t.groups.map((g) => ({ text: g.text, options: { bold: true, fill: "E7E6E6", align: "center", colspan: g.span } }))] : []),
+    t.head.map((c, i) => ({ text: String(c), options: { bold: true, fill: "F2F2F2", align: i ? "center" : "left" } })),
+    ...t.rows.map((r) => r.map((c, i) => ({ text: String(c),
+      options: { ...(isSection(r) ? { bold: true, fill: "FAFAFA" } : {}), align: i ? "right" : "left" } }))),
+  ];
+  // 下端（注記の上）に収まる行の高さにする。
+  // PowerPointは文字の大きさより低い行にできないので、上下の余白を0にして7ptに落とす。
+  const rowH = Math.min(0.2, (notesTop(p) - 0.1 - top) / rows.length);
+  s.addTable(rows, { x: X, y: top, w: W, colW, fontSize: rowH < 0.16 ? 7 : 8, color: FG, fontFace: FONT,
+    valign: "middle", autoPage: false, rowH, margin: [0, 0.04, 0, 0.04], border: { type: "solid", color: GRAY, pt: 0.5 } });
 }
 
 /** 左に大きな表（主な経営指標）、右にほかの表と所見。 */

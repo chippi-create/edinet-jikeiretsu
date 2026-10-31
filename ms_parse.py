@@ -188,7 +188,11 @@ def parse_deal(text):
     body = t[i:] if i >= 0 else t
     d = {}
     d["ASR"] = bool(re.search(r"ファシリティ型自己株式取得|\(ASR\)|（ASR）", body))
-    m = re.search(DATE + r"(?:\([^)]*\))?\s*(?:に開催された|開催の|付の|付)?\s*(?:当社)?取締役会(?:において|決議|の決議)", body)
+    # 決議日は、募集の条件の注記（「(注)1.…の発行は、◯年◯月◯日開催の当社取締役会において決議…」）から取る。
+    # 本文全体から探すと、過去の決議や更生手続の開始日を拾う（キャンバスで2023年、トーシンHDで更生手続の開始日）。
+    RES = DATE + r"(?:\([^)]*\))?\s*(?:に開催された|開催の|付の|付|の)?\s*(?:当社)?(?:臨時)?取締役会(?:において|決議|の決議|で)"
+    k = body.find("(注)")
+    m = re.search(RES, body[k:k + 3000]) if k >= 0 else None
     d["決議日"] = ymd(m) if m else None
     names = [re.sub(r"\s+", " ", m.group(1)).strip()
              for m in re.finditer(r"割当予定先の概要[\s\S]{0,150}?名称\s*｜\s*([^｜]+?)\s*｜", body)]

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MSワラント一覧｜有価証券届出書から自動収集</title>
+<meta name="description" content="EDINETの有価証券届出書から、行使価額修正条項付新株予約権（MSワラント）・MSCBの発行条件を自動で集めて一覧にしています。">
+<style>
+:root{
+  --ink:#1B2430; --mute:#6B7684; --rule:#E3E8EF; --paper:#F7F9FC;
+  --navy:#1F3352; --accent:#2F6DB5; --warn-bg:#FDECEA; --warn-ink:#8B1A10;
+}
+*{box-sizing:border-box}
+body{margin:0; color:var(--ink); background:#fff;
+  font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+  font-size:14px; line-height:1.6;}
+header{background:var(--navy); color:#fff; padding:16px}
+header a{color:#fff}
+h1{margin:0; font-size:16px}
+.sub{margin:4px 0 0; font-size:11px; opacity:.82}
+.wrap{max-width:1400px; margin:0 auto; padding:0 16px}
+.controls{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; padding:14px 0; border-bottom:1px solid var(--rule)}
+input[type=search]{flex:1 1 260px; padding:10px 12px; font-size:15px; border:1px solid var(--rule); border-radius:8px}
+select{padding:8px; font:inherit; border:1px solid var(--rule); border-radius:8px; background:#fff}
+label.ck{font-size:13px; white-space:nowrap}
+.btn{font:inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer}
+.count{padding:10px 0; font-size:12px; color:var(--mute)}
+.tablewrap{overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--rule); border-radius:8px}
+table{border-collapse:collapse; font-size:12px; min-width:100%}
+th,td{padding:7px 8px; border-bottom:1px solid var(--rule); text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+th{position:sticky; top:0; background:var(--paper); font-weight:600; z-index:1}
+th.l,td.l{text-align:left}
+td.name{white-space:normal; min-width:11em}
+tr.deal{cursor:pointer}
+tr.deal:hover td{background:var(--paper)}
+tr.sub td{color:var(--mute)}
+tr.open td{background:#EEF4FB}
+.tag{display:inline-block; padding:0 6px; border-radius:4px; font-size:11px; background:var(--paper); border:1px solid var(--rule); margin-left:4px}
+.detail td{background:#fff; text-align:left; white-space:normal; padding:12px 14px}
+.dgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px 28px;
+  position:sticky; left:14px; width:min(calc(100vw - 64px), 1340px)}
+.dgrid h4{margin:0 0 6px; font-size:13px}
+.kv{width:100%; min-width:0; font-size:12px}
+.kv th,.kv td{position:static; background:none; text-align:left; white-space:normal; padding:4px 6px; font-weight:normal}
+.kv th{color:var(--mute); width:11em}
+.src{color:var(--accent)}
+.note{margin:16px 0 28px; padding:10px 12px; font-size:12px; line-height:1.8; color:var(--mute); background:var(--paper); border:1px solid var(--rule); border-radius:8px}
+.empty{padding:28px 0; color:var(--mute)}
+</style>
+</head>
+<body>
+<header>
+  <h1>MSワラント一覧（行使価額修正条項付新株予約権・MSCB）</h1>
+  <p class="sub">EDINETの有価証券届出書から自動で集めています。<span id="gen"></span>　<a href="/">財務時系列へ</a></p>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <input type="search" id="q" placeholder="会社名・コード・割当先で絞り込み">
+    <select id="year"><option value="">すべての年</option></select>
+    <label class="ck"><input type="checkbox" id="asr"> ASR（自己株式取得のための発行）も表示</label>
+    <label class="ck"><input type="checkbox" id="others"> 同じ届出書の修正条項なしの回号も表示</label>
+    <button class="btn" id="csv">CSVで保存</button>
+  </div>
+  <div class="count" id="count">読み込んでいます…</div>
+  <div class="tablewrap"><table id="tbl"></table></div>
+  <div class="note">
+    数字は届出書の決まった言い回しから機械的に拾っています（AIには読ませていません）。拾えなかった項目は「—」です。
+    行をクリックすると、資金使途（支出予定時期）・発行諸費用の内訳・貸株の内容と、元の届出書へのリンクが出ます。必ず元の書類で確かめてください。<br>
+    条件決定日がある案件は、行使価額などが後日の訂正届出書で確定します。訂正届出書の数字が読めた場合はそちらを使い、読めなかった場合は届出書の数字のままです。<br>
+    評価額＝発行価格（新株予約権1個の払込金額）を1株当たりにした額。発行諸費用率＝発行諸費用の概算額÷払込金額の総額。希薄化率は届出書の記載（議決権ベースを優先）。<br>
+    出典：EDINET（金融庁）の有価証券届出書・訂正有価証券届出書。このページは提出書類を加工して作成したもので、金融庁が作成したものではありません。
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const yen = (v) => v === null || v === undefined ? "—" : Number(v).toLocaleString("ja-JP");
+const pct = (v, d = 1) => v === null || v === undefined ? "—" : `${Number(v).toFixed(d)}%`;
+const val = (v) => v === null || v === undefined || v === "" ? "—" : v;
+const pdf = (id) => `https://disclosure2dl.edinet-fsa.go.jp/searchdocument/pdf/${id}.pdf`;
+let deals = [], openId = null;
+
+// 一覧の列（回号ごとの行）。CSVも同じ並び。
+const COLS = [
+  ["決議日", (d) => d.決議日 || d.提出日, "l"],
+  ["コード", (d) => d.コード, "l"],
+  ["会社名", (d) => d.会社名, "l name"],
+  ["回号", (d, t) => `第${t.回号}回${t.種類 === "新株予約権付社債" ? "（CB）" : ""}`, "l"],
+  ["割当予定先", (d) => d.割当予定先, "l name"],
+  ["潜在株式数", (d, t) => yen(t.潜在株式数)],
+  ["希薄化率", (d) => pct(d.希薄化率, 2)],
+  ["評価額（1株）", (d, t) => val(t.評価額_1株当たり)],
+  ["当初行使価額", (d, t) => val(t.当初行使価額)],
+  ["修正（基準の何%）", (d, t) => t["修正_基準価格の何%"] === null || t["修正_基準価格の何%"] === undefined ? "—" : `${t["修正_基準価格の何%"]}%`],
+  ["修正の型", (d, t) => val(t.修正の型), "l"],
+  ["修正時の端数", (d, t) => val(t.修正時の端数処理), "l"],
+  ["下限行使価額", (d, t) => val(t.下限行使価額)],
+  ["下限（基準の何%）", (d, t) => t["下限_基準価格の何%"] === null || t["下限_基準価格の何%"] === undefined ? "—" : `${t["下限_基準価格の何%"]}%`],
+  ["下限の修正", (d, t) => val(t.下限行使価額の修正), "l"],
+  ["上限", (d, t) => val(t.上限行使価額), "l"],
+  ["行使開始日", (d, t) => val(t.行使開始日), "l"],
+  ["行使終了日", (d, t) => val(t.行使終了日), "l"],
+  ["条件決定日", (d, t) => t.条件決定日の有無 === "有" ? (t.条件決定日 || "有") : "無", "l"],
+  ["プット", (d, t) => val(t.プット), "l"],
+  ["停止指定", (d, t) => val(t.停止指定), "l"],
+  ["貸株", (d) => val(d.貸株), "l"],
+  ["複数回号", (d) => val(d.複数回号), "l"],
+  ["払込金額（新株予約権）", (d, t) => yen(t.払込金額_新株予約権)],
+  ["払込金額の総額", (d) => yen(d.払込金額の総額)],
+  ["発行諸費用の概算額", (d) => yen(d.発行諸費用の概算額)],
+  ["発行諸費用率", (d) => d.発行諸費用率 === null || d.発行諸費用率 === undefined ? "—" : `${(d.発行諸費用率 * 100).toFixed(2)}%`],
+  ["差引手取概算額", (d) => yen(d.差引手取概算額)],
+];
+
+function rowsOf(d) {
+  const all = d.回号 || [];
+  const ms = all.filter((t) => t.修正条項付);
+  return $("others").checked ? all : (ms.length ? ms : all);
+}
+
+function filtered() {
+  const q = $("q").value.trim().toLowerCase(), y = $("year").value;
+  return deals.filter((d) => (!d.ASR || $("asr").checked)
+    && (!y || (d.決議日 || d.提出日 || "").startsWith(y))
+    && (!q || `${d.コード} ${d.会社名} ${d.割当予定先 || ""}`.toLowerCase().includes(q)));
+}
+
+function detail(d) {
+  const kv = (rows) => `<table class="kv">${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("")}</table>`;
+  const uses = (d.資金使途 || []).map((u) => `<tr><td>${esc(u.使途)}</td><td>${esc(u.金額 ?? "—")}</td><td>${esc(u.支出予定時期)}</td></tr>`).join("");
+  return `<div class="dgrid">
+    <div><h4>資金使途（支出予定時期）</h4>${uses ? `<table class="kv"><tr><th>使途</th><th>金額${d.使途の単位 ? `（${esc(d.使途の単位)}）` : ""}</th><th>支出予定時期</th></tr>${uses}</table>` : "—"}</div>
+    <div><h4>発行諸費用・貸株</h4>${kv([
+      ["発行諸費用の概算額", `${yen(d.発行諸費用の概算額)}円`],
+      ["内訳", esc(d.発行諸費用の内訳 || "—")],
+      ["発行諸費用率", d.発行諸費用率 ? `${(d.発行諸費用率 * 100).toFixed(2)}%` : "—"],
+      ["貸株", `${esc(d.貸株 || "—")}${d.貸株の内容 ? `：${esc(d.貸株の内容)}` : ""}`],
+    ])}</div>
+    <div><h4>書類</h4>${kv([
+      ["有価証券届出書", `<a class="src" href="${pdf(d.docID)}" target="_blank" rel="noopener">${esc(d.docID)}（${esc(d.提出日)}提出・PDF）</a>`],
+      ["訂正届出書", (d.訂正 || []).map((id) => `<a class="src" href="${pdf(id)}" target="_blank" rel="noopener">${esc(id)}</a>`).join("、") || "なし"],
+      ["回号", (d.回号 || []).map((t) => `第${t.回号}回${t.種類 === "新株予約権付社債" ? "（CB）" : ""}${t.修正条項付 ? "" : "（修正条項なし）"}`).join("、")],
+    ])}</div>
+  </div>`;
+}
+
+function render() {
+  const list = filtered();
+  const head = `<tr>${COLS.map(([h, , c]) => `<th class="${c || ""}">${esc(h)}</th>`).join("")}</tr>`;
+  let body = "";
+  for (const d of list) {
+    rowsOf(d).forEach((t, i) => {
+      body += `<tr class="deal${i ? " sub" : ""}${openId === d.docID ? " open" : ""}" data-id="${esc(d.docID)}">` +
+        COLS.map(([h, f, c]) => {
+          let v = esc(f(d, t));
+          if (h === "会社名" && i === 0) v += (d.ASR ? `<span class="tag">ASR</span>` : "") + (d.訂正?.length ? `<span class="tag">訂正あり</span>` : "");
+          if (i && ["決議日", "コード", "会社名", "割当予定先", "希薄化率", "貸株", "複数回号", "払込金額の総額", "発行諸費用の概算額", "発行諸費用率", "差引手取概算額"].includes(h)) v = "";
+          return `<td class="${c || ""}">${v}</td>`;
+        }).join("") + `</tr>`;
+    });
+    if (openId === d.docID) body += `<tr class="detail"><td colspan="${COLS.length}">${detail(d)}</td></tr>`;
+  }
+  $("tbl").innerHTML = head + (body || "");
+  $("count").textContent = list.length ? `${list.length}件` : "該当する案件はありません";
+  for (const tr of $("tbl").querySelectorAll("tr.deal")) {
+    tr.onclick = () => { openId = openId === tr.dataset.id ? null : tr.dataset.id; render(); };
+  }
+}
+
+function csv() {
+  const lines = [COLS.map(([h]) => h).concat(["資金使途", "発行諸費用の内訳", "貸株の内容", "届出書"]).join(",")];
+  const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  for (const d of filtered()) {
+    for (const t of rowsOf(d)) {
+      lines.push(COLS.map(([, f]) => q(f(d, t))).concat([
+        q((d.資金使途 || []).map((u) => `${u.使途}（${u.金額 ?? "—"}、${u.支出予定時期}）`).join(" / ")),
+        q(d.発行諸費用の内訳), q(d.貸株の内容), q(pdf(d.docID)),
+      ]).join(","));
+    }
+  }
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `ms_warrants_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+fetch("/ms.json").then((r) => r.json()).then((j) => {
+  deals = j.deals || [];
+  $("gen").textContent = j.generated ? `更新：${j.generated.slice(0, 10)}` : "";
+  const years = [...new Set(deals.map((d) => (d.決議日 || d.提出日 || "").slice(0, 4)).filter(Boolean))].sort().reverse();
+  $("year").innerHTML += years.map((y) => `<option>${y}</option>`).join("");
+  render();
+}).catch(() => { $("count").textContent = "一覧を読み込めませんでした。"; });
+for (const id of ["q", "year", "asr", "others"]) $(id).addEventListener("input", render);
+$("csv").onclick = csv;
+</script>
+</body>
+</html>

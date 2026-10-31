@@ -13,6 +13,9 @@ on:
       max:
         description: "書き出す件数の上限"
         default: "8"
+      doc_ids:
+        description: "書類番号を直接指定（カンマ区切り。入れると日付の範囲は見ない）"
+        default: ""
 
 jobs:
   probe:
@@ -30,6 +33,7 @@ jobs:
           START: ${{ inputs.start }}
           END: ${{ inputs.end }}
           MAX: ${{ inputs.max }}
+          DOC_IDS: ${{ inputs.doc_ids }}
       - uses: actions/upload-artifact@v4
         with:
           name: ms-probe

@@ -18,6 +18,8 @@ import sections
 START = os.environ.get("START", "2026-09-01")
 END = os.environ.get("END", "2026-10-31")
 MAX = int(os.environ.get("MAX", "8"))
+# 書類番号を直接指定して書き出す（カンマ区切り）。指定があれば日付の範囲は見ない。
+DOC_IDS = [x.strip() for x in os.environ.get("DOC_IDS", "").split(",") if x.strip()]
 OUT = os.path.join("out", "ms")
 # 届出書（030）と訂正届出書（040）。臨時報告書（180）も見ておく。
 TYPES = {"030", "040", "180"}
@@ -31,6 +33,18 @@ def to_text(html):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    if DOC_IDS:
+        for i in DOC_IDS:
+            z = sections.fetch_zip(i)
+            if z is None:
+                print(f"  {i}: ZIPを取得できませんでした", flush=True)
+                continue
+            names = sorted(n for n in z.namelist() if "/PublicDoc/" in n and n.endswith(".htm"))
+            text = "\n\n".join(f"##### {n}\n" + to_text(z.read(n).decode("utf-8", "replace")) for n in names)
+            with open(os.path.join(OUT, f"{i}.txt"), "w", encoding="utf-8") as f:
+                f.write(i + "\n\n" + text)
+            print(f"  {i}: {len(text):,}字", flush=True)
+        return
     d = datetime.date.fromisoformat(START)
     end = datetime.date.fromisoformat(END)
     docs = []

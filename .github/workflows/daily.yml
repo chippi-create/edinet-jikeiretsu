@@ -29,6 +29,12 @@ on:
       past_years:
         description: "証券コードを入れたとき、前の期の有報から何期ぶん補うか（財務の欠けた年・所有者別・大株主。0なら取らない）"
         default: "3"
+      ms_start:
+        description: "MSワラント：届出書をいつから見るか（YYYY-MM-DD。空なら直近7日）。遡るときは財務・記述部分の件数を0にして回す"
+        default: ""
+      ms_limit:
+        description: "MSワラント：1回で読む届出書の数"
+        default: "150"
 
 permissions:
   contents: write
@@ -79,6 +85,15 @@ jobs:
           LIMIT: ${{ inputs.sections_limit || '600' }}
           SEC_CODES: ${{ inputs.codes }}
           PAST_YEARS: ${{ inputs.past_years || '0' }}
+
+      # MSワラント（行使価額修正条項付新株予約権）の届出書。落ちても他は止めない。
+      - name: fetch ms warrants
+        continue-on-error: true
+        run: python ms.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          MS_START: ${{ inputs.ms_start }}
+          MS_LIMIT: ${{ inputs.ms_limit || '150' }}
 
       - name: build site
         run: python build_site.py

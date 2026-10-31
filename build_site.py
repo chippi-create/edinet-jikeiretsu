@@ -270,6 +270,19 @@ def main():
     # 要約を作るときだけ読む材料。サイトの表示には使わない。
     copy_per_company("context", "context", ".json")
 
+    # MSワラント一覧（ms.py が作る data/ms.json と、ページ ms.html）
+    ms_src = os.path.join(HERE, "data", "ms.json")
+    if os.path.exists(ms_src):
+        with open(ms_src, encoding="utf-8") as f:
+            body = f.read()
+        with open(os.path.join(SITE, "ms.json"), "w", encoding="utf-8") as f:
+            f.write(body)
+        os.makedirs(os.path.join(SITE, "ms"), exist_ok=True)
+        with open(os.path.join(HERE, "ms.html"), encoding="utf-8") as f:
+            page = f.read()
+        with open(os.path.join(SITE, "ms", "index.html"), "w", encoding="utf-8") as f:
+            f.write(page)
+
     # 所有者別・大株主の期ごとの記録。2期以上ある会社だけ配る（1期なら最新の表と同じ）。
     # 区分名は最新の表と同じようにそろえる。
     has_oh = set()

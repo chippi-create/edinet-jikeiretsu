@@ -1,0 +1,36 @@
+name: ms probe
+
+# MSワラントの届出書の本文を書き出して、項目の書き方を目で見るための実行。
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日（YYYY-MM-DD）"
+        default: "2026-09-01"
+      end:
+        description: "終了日（YYYY-MM-DD）"
+        default: "2026-10-31"
+      max:
+        description: "書き出す件数の上限"
+        default: "8"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - run: python ms_probe.py
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+          MAX: ${{ inputs.max }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ms-probe
+          path: out/ms/

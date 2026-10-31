@@ -31,6 +31,9 @@ OUT = os.path.join(DATA, "ms.json")
 MS_START = os.environ.get("MS_START", "").strip()
 MS_LIMIT = int(os.environ.get("MS_LIMIT", "150") or 150)
 TYPES = ("030", "040")
+# 読み取り（ms_parse）の版。読み方を直したら変える。版が違うMSワラントの書類は取り直して読み直す
+# （MSワラントの書類だけなので数は少ない）。
+PARSE_VERSION = "2026-10-31b 当初・下限の書き方を追加、修正の型は修正頻度の欄から"
 MARK = re.compile(r"行使価額修正条項付|転換価額の修正")
 
 
@@ -100,7 +103,7 @@ def read_doc(x):
         return False
     meta = {k: x.get(k) for k in ("docID", "docTypeCode", "parentDocID", "secCode", "filerName",
                                    "docDescription", "submitDateTime", "edinetCode")}
-    return {"meta": meta, **deal}
+    return {"meta": meta, "版": PARSE_VERSION, **deal}
 
 
 def build(st):
@@ -161,6 +164,16 @@ def main():
     os.makedirs(DOC_DIR, exist_ok=True)
     st = load_state()
     found = scan(st)
+    # 読み取りの版が古いMSワラントの書類を先に読み直す
+    stale = []
+    for fn in sorted(os.listdir(DOC_DIR)):
+        with open(os.path.join(DOC_DIR, fn), encoding="utf-8") as f:
+            j = json.load(f)
+        if j.get("版") != PARSE_VERSION and j.get("回号"):
+            stale.append(j["meta"])
+    if stale:
+        log(f"■ MSワラント：読み取りの版が古い書類 {len(stale)}件を読み直す")
+    found = stale + found
     log(f"■ MSワラント：未読の届出書・訂正届出書 {len(found)}件（今回 {min(len(found), MS_LIMIT)}件まで）")
     hit = 0
     for x in found[:MS_LIMIT]:
@@ -180,6 +193,10 @@ def main():
                                                      "docDescription", "submitDateTime", "edinetCode")}, "回号": []}
             else:
                 st["docs"][x["docID"]] = "no"
+                # 読み直した結果MSワラントでなかったものは、前の記録を消す
+                old = os.path.join(DOC_DIR, f"{x['docID']}.json")
+                if os.path.exists(old):
+                    os.remove(old)
                 continue
         with open(os.path.join(DOC_DIR, f"{x['docID']}.json"), "w", encoding="utf-8") as f:
             json.dump(j, f, ensure_ascii=False, separators=(",", ":"))

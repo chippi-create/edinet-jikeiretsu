@@ -39,7 +39,7 @@ JPX_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001v
 # 何日さかのぼって一覧を見るか。TDnetの公開は約1か月なので、それより前は取れない。
 PO_DAYS = int(os.environ.get("PO_DAYS", "4") or 4)
 # 読み取りの版。読み方を直したら変える。版が違うお知らせは、PDFが残っていれば読み直す。
-PARSE_VERSION = "2026-11-03b"
+PARSE_VERSION = "2026-11-03c"
 
 INC = r"売出|新株式発行|新株式の発行|募集株式|自己株式の処分|自己株式処分|第三者割当|公募|発行価格|海外募集"
 # 新株予約権（MSワラントは別の一覧）、株式報酬・従業員向け、子会社の増資、種類株式、IPO・立会外分売は外す
@@ -115,10 +115,12 @@ def scan(st):
     """一覧を見て、対象のお知らせを読む。直近2日は毎回見直す（夕方の開示が翌日の一覧に入ることがある）。"""
     today = datetime.date.today()
     n = 0
+    # 読み取りの版を上げたら、見た日も含めて一覧を見直す（PDFが残っている間だけ読み直せる）
+    redo = st.get("版") != PARSE_VERSION
     for i in range(PO_DAYS):
         day = today - datetime.timedelta(days=i)
         key = day.isoformat()
-        if key in st["days"] and i > 2:
+        if key in st["days"] and i > 2 and not redo:
             continue
         rows = day_list(day)
         st["days"][key] = len(rows)
@@ -142,6 +144,7 @@ def scan(st):
             n += 1
             log(f"  {key} {r['code']} {r['name']} [{d['種別']}] {r['title'][:40]} "
                 f"新株{d['新株']} 売出{d['売出']} OA{d['OA']} 処分{d['処分']}")
+    st["版"] = PARSE_VERSION
     return n
 
 
@@ -210,7 +213,8 @@ def build():
     notes = []
     for fn in os.listdir(DOC_DIR) if os.path.isdir(DOC_DIR) else []:
         notes.append(load(os.path.join(DOC_DIR, fn), None))
-    notes = [n for n in notes if n]
+    # 対象の決め方を変えたときに、前に読んだ対象外のお知らせが残らないように表題で選び直す
+    notes = [n for n in notes if n and re.search(INC, n["表題"]) and not re.search(EXC, n["表題"])]
     notes.sort(key=lambda n: (n["日"], n.get("時刻") or ""))
     deals = {}
 
@@ -226,7 +230,7 @@ def build():
 
     FIELDS = ("新株", "売出", "OA", "OA三者", "処分", "発行価格", "売出価格", "処分価格", "条件決定日_予定",
               "受渡日", "受渡日_予定", "払込期日", "発行済株式数_お知らせ", "資金使途", "割当先", "海外募集",
-              "発行価格の総額", "売出価格の総額", "処分価額の総額")
+              "発行価格の総額", "売出価格の総額", "処分価額の総額", "市場外")
     for n in notes:
         kind = n["種別"]
         if kind == "参考":

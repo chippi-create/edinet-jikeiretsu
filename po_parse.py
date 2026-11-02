@@ -107,6 +107,8 @@ def parse(raw, title):
         # 「本日付の取締役会決議」… お知らせの日付（冒頭の最初の日付）
         m = re.search(DATE, t[:400])
         d["決議日"] = ymd(m) if m else None
+    # 大株主どうしの市場外の相対取引による「売出し」（売出規制の対象。引受人による募集・売出しではない）
+    d["市場外"] = bool(re.search(r"市場外[^。]{0,20}相対|相対取引", t)) and not re.search(r"引受人|買取引受", t)
     d["海外募集"] = bool(re.search(r"海外募集", t)) and not re.search(r"海外募集(?:は|を)行(?:わ|いま)せん", t)
     secs, body = sections(t)
     v = {"新株": 0, "海外": 0, "売出": 0, "OA": 0, "OA三者": 0, "処分": 0}

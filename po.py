@@ -39,12 +39,12 @@ JPX_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001v
 # 何日さかのぼって一覧を見るか。TDnetの公開は約1か月なので、それより前は取れない。
 PO_DAYS = int(os.environ.get("PO_DAYS", "4") or 4)
 # 読み取りの版。読み方を直したら変える。版が違うお知らせは、PDFが残っていれば読み直す。
-PARSE_VERSION = "2026-11-03a"
+PARSE_VERSION = "2026-11-03b"
 
 INC = r"売出|新株式発行|新株式の発行|募集株式|自己株式の処分|自己株式処分|第三者割当|公募|発行価格|海外募集"
 # 新株予約権（MSワラントは別の一覧）、株式報酬・従業員向け、子会社の増資、種類株式、IPO・立会外分売は外す
 EXC = (r"新株予約権|ストック|譲渡制限|報酬|持株会|信託|ESOP|インセンティブ|奨励|子会社(?:と|の|による|である)|"
-       r"引受け|種類株式|優先株式|株式交付制度|再発防止|意思確認|資金使途|使途|上場|立会外|分売")
+       r"引受け|引受に|引き受け|種類株式|優先株式|株式交付制度|再発防止|意思確認|資金使途|使途|上場|立会外|分売")
 UA = {"User-Agent": "Mozilla/5.0 (compatible; edinet-jikeiretsu/1.0)"}
 
 
@@ -225,7 +225,8 @@ def build():
         return max(cand, key=lambda d: d["決議日"]) if cand else None
 
     FIELDS = ("新株", "売出", "OA", "OA三者", "処分", "発行価格", "売出価格", "処分価格", "条件決定日_予定",
-              "受渡日", "受渡日_予定", "払込期日", "発行済株式数_お知らせ", "資金使途", "割当先", "海外募集")
+              "受渡日", "受渡日_予定", "払込期日", "発行済株式数_お知らせ", "資金使途", "割当先", "海外募集",
+              "発行価格の総額", "売出価格の総額", "処分価額の総額")
     for n in notes:
         kind = n["種別"]
         if kind == "参考":
@@ -250,7 +251,8 @@ def build():
             continue
         d["お知らせ"].append({"id": n["id"], "日": n["日"], "表題": n["表題"], "種別": kind})
         if kind in ("決定", "変更"):
-            for f in ("OA", "発行価格", "売出価格", "処分価格", "受渡日", "払込期日", "資金使途", "海外募集"):
+            for f in ("OA", "発行価格", "売出価格", "処分価格", "受渡日", "払込期日", "資金使途", "海外募集",
+                      "発行価格の総額", "売出価格の総額", "処分価額の総額"):
                 if n.get(f) not in (None, False):
                     d[f] = n[f]
             if kind == "変更":
@@ -281,6 +283,13 @@ def build():
         d["議決権株式数"] = vr * unit if vr else None
         d["議決権の基準"] = s.get("基準") if vr else None
         new, sec, tr, oa = d.get("新株") or 0, d.get("売出") or 0, d.get("処分") or 0, d.get("OA") or 0
+        # 1株の価格を総額÷株数で確かめる。割り切れる（1銭単位で一致する）ほうを採る
+        for pk, tk, q in (("発行価格", "発行価格の総額", new), ("売出価格", "売出価格の総額", sec), ("処分価格", "処分価額の総額", tr)):
+            tot = d.get(tk)
+            if tot and q:
+                p = round(tot / q, 2)
+                if abs(p * q - tot) < q * 0.005 + 1 and d.get(pk) != p:
+                    d[pk] = int(p) if float(p).is_integer() else p
         # OAに伴う第三者割当があれば、OA分は新株（希薄化）。無ければ株主からの借株（売出）。
         oa_new = oa if d.get("OA三者") else 0
         oa_sec = oa - oa_new

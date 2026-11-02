@@ -36,7 +36,7 @@ on:
         description: "MSワラント：1回で読む届出書の数"
         default: "150"
       po_days:
-        description: "公募・売出：TDnetの一覧を何日さかのぼって見るか（公開は約1か月なので31まで）"
+        description: "公募・売出：TDnetの一覧を何日さかのぼって見るか（公開は約1か月。40日ほどまで残っている）"
         default: "4"
 
 permissions:

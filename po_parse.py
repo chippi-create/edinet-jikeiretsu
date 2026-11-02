@@ -156,6 +156,21 @@ def parse(raw, title):
     d["処分価格"] = price(r"処分価(?:額|格)", t, loose)
     if d["種別"] == "決議" and not loose:
         d["発行価格"] = d["売出価格"] = d["処分価格"] = None
+    # 総額。PDFの段組みで見出しと値がずれると、1株の価格は隣の欄（引受価額・終値）を拾うことがある。
+    # 総額÷株数で確かめるために持つ（po.py で使う）
+    def total(label):
+        if d["種別"] == "決議" and not loose:
+            return None
+        for m in re.finditer(f"(?:{label})" + r"([\s\S]{0,300}?)(?<![\d,.])" + NUM + r"\s*(百万円|千円|円)", t):
+            if re.search(r"未定|上限", m.group(1)):
+                continue
+            v = num(m.group(2)) * {"百万円": 1_000_000, "千円": 1000, "円": 1}[m.group(3)]
+            if v >= 1_000_000:
+                return v
+        return None
+    d["発行価格の総額"] = total(r"発行価格の総額") or (total(r"払込金額の総額|発行価額の総額|調達資金の額") if re.search(r"第三者割当", title) else None)
+    d["売出価格の総額"] = total(r"売出価格の総額|売出価額の総額")
+    d["処分価額の総額"] = total(r"処分価額の総額|処分価格の総額")
     m = re.search(r"算定基準日(?:及びその価格)?[\s\S]{0,20}?" + DATE, t)
     d["算定基準日"] = ymd(m) if m else None
     m = re.search(r"ディスカウント率[\s\S]{0,40}?(\d+(?:\.\d+)?)\s*%", t)

@@ -39,7 +39,7 @@ JPX_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001v
 # 何日さかのぼって一覧を見るか。TDnetの公開は約1か月なので、それより前は取れない。
 PO_DAYS = int(os.environ.get("PO_DAYS", "4") or 4)
 # 読み取りの版。読み方を直したら変える。版が違うお知らせは、PDFが残っていれば読み直す。
-PARSE_VERSION = "2026-11-03c"
+PARSE_VERSION = "2026-11-03d"
 
 INC = r"売出|新株式発行|新株式の発行|募集株式|自己株式の処分|自己株式処分|第三者割当|公募|発行価格|海外募集"
 # 新株予約権（MSワラントは別の一覧）、株式報酬・従業員向け、子会社の増資、種類株式、IPO・立会外分売は外す
@@ -106,7 +106,9 @@ def pdf_text(name):
         src, dst = os.path.join(tmp, "a.pdf"), os.path.join(tmp, "a.txt")
         with open(src, "wb") as f:
             f.write(r.content)
-        subprocess.run(["pdftotext", "-enc", "UTF-8", src, dst], check=True)
+        # -raw（PDFに書かれた順）。既定の段組み推定は pdftotext の版で並びが変わり、
+        # 手元とGitHubで表の見出しと値の組み合わせがずれた（井関農機の売出価格に引受価額）
+        subprocess.run(["pdftotext", "-raw", "-enc", "UTF-8", src, dst], check=True)
         with open(dst, encoding="utf-8", errors="replace") as f:
             return f.read()
 
@@ -287,12 +289,13 @@ def build():
         d["議決権株式数"] = vr * unit if vr else None
         d["議決権の基準"] = s.get("基準") if vr else None
         new, sec, tr, oa = d.get("新株") or 0, d.get("売出") or 0, d.get("処分") or 0, d.get("OA") or 0
-        # 1株の価格を総額÷株数で確かめる。割り切れる（1銭単位で一致する）ほうを採る
+        # 1株の価格を総額÷株数で確かめる。総額が1銭単位で割り切れ、読んだ価格と3割以上離れていなければ総額側を採る
+        # （総額の欄を取り違えた場合に、まったく違う価格へ置き換えない）
         for pk, tk, q in (("発行価格", "発行価格の総額", new), ("売出価格", "売出価格の総額", sec), ("処分価格", "処分価額の総額", tr)):
-            tot = d.get(tk)
+            tot, cur = d.get(tk), d.get(pk)
             if tot and q:
                 p = round(tot / q, 2)
-                if abs(p * q - tot) < q * 0.005 + 1 and d.get(pk) != p:
+                if abs(p * q - tot) < 1 and p != cur and (cur is None or abs(p / cur - 1) < 0.3):
                     d[pk] = int(p) if float(p).is_integer() else p
         # OAに伴う第三者割当があれば、OA分は新株（希薄化）。無ければ株主からの借株（売出）。
         oa_new = oa if d.get("OA三者") else 0

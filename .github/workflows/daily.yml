@@ -35,6 +35,9 @@ on:
       ms_limit:
         description: "MSワラント：1回で読む届出書の数"
         default: "150"
+      po_days:
+        description: "公募・売出：TDnetの一覧を何日さかのぼって見るか（公開は約1か月なので31まで）"
+        default: "4"
 
 permissions:
   contents: write
@@ -94,6 +97,17 @@ jobs:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
           MS_START: ${{ inputs.ms_start }}
           MS_LIMIT: ${{ inputs.ms_limit || '150' }}
+
+      # 公募増資・売出・第三者割当・自己株式処分（TDnetの適時開示）。落ちても他は止めない。
+      # PDFは文字にして読むだけで保存しない（pdftotext を使う）。
+      - name: fetch public offerings
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq poppler-utils >/dev/null
+          pip install -q openpyxl
+          python po.py
+        env:
+          PO_DAYS: ${{ inputs.po_days || '4' }}
 
       - name: build site
         run: python build_site.py

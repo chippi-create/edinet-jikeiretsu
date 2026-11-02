@@ -283,6 +283,19 @@ def main():
         with open(os.path.join(SITE, "ms", "index.html"), "w", encoding="utf-8") as f:
             f.write(page)
 
+    # 公募増資・売出一覧（po.py が作る data/po.json と、ページ po.html）
+    po_src = os.path.join(HERE, "data", "po.json")
+    if os.path.exists(po_src):
+        with open(po_src, encoding="utf-8") as f:
+            body = f.read()
+        with open(os.path.join(SITE, "po.json"), "w", encoding="utf-8") as f:
+            f.write(body)
+        os.makedirs(os.path.join(SITE, "po"), exist_ok=True)
+        with open(os.path.join(HERE, "po.html"), encoding="utf-8") as f:
+            page = f.read()
+        with open(os.path.join(SITE, "po", "index.html"), "w", encoding="utf-8") as f:
+            f.write(page)
+
     # 所有者別・大株主の期ごとの記録。2期以上ある会社だけ配る（1期なら最新の表と同じ）。
     # 区分名は最新の表と同じようにそろえる。
     has_oh = set()

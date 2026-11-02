@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公募増資・売出一覧｜適時開示から自動収集</title>
+<meta name="description" content="TDnetの適時開示から、公募増資・株式の売出し・第三者割当・自己株式処分の条件を自動で集めて一覧にしています。">
+<style>
+:root{
+  --ink:#1B2430; --mute:#6B7684; --rule:#E3E8EF; --paper:#F7F9FC;
+  --navy:#1F3352; --accent:#2F6DB5;
+}
+*{box-sizing:border-box}
+body{margin:0; color:var(--ink); background:#fff;
+  font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+  font-size:14px; line-height:1.6;}
+header{background:var(--navy); color:#fff; padding:16px}
+header a{color:#fff}
+h1{margin:0; font-size:16px}
+.sub{margin:4px 0 0; font-size:11px; opacity:.82}
+.wrap{max-width:1400px; margin:0 auto; padding:0 16px}
+.controls{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; padding:14px 0; border-bottom:1px solid var(--rule)}
+input[type=search]{flex:1 1 260px; padding:10px 12px; font-size:15px; border:1px solid var(--rule); border-radius:8px}
+select{padding:8px; font:inherit; border:1px solid var(--rule); border-radius:8px; background:#fff}
+.btn{font:inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer}
+.count{padding:10px 0; font-size:12px; color:var(--mute)}
+.tablewrap{overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--rule); border-radius:8px}
+table{border-collapse:collapse; font-size:12px; min-width:100%}
+th,td{padding:7px 8px; border-bottom:1px solid var(--rule); text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+th{position:sticky; top:0; background:var(--paper); font-weight:600; z-index:1; vertical-align:bottom}
+th.oa{background:#EEF4FB}
+th.l,td.l{text-align:left}
+td.name{white-space:normal; min-width:9em}
+td.wide{white-space:normal; min-width:16em; max-width:24em}
+.clip{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+tr.deal{cursor:pointer}
+tr.deal:hover td{background:var(--paper)}
+tr.open td{background:#EEF4FB}
+.tag{display:inline-block; padding:0 6px; border-radius:4px; font-size:11px; background:var(--paper); border:1px solid var(--rule); margin-left:4px}
+.plan{color:var(--mute)}
+.detail td{background:#fff; text-align:left; white-space:normal; padding:12px 14px}
+.dgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px 28px;
+  position:sticky; left:14px; width:min(calc(100vw - 64px), 1340px)}
+.dgrid h4{margin:0 0 6px; font-size:13px}
+.kv{width:100%; min-width:0; font-size:12px}
+.kv th,.kv td{position:static; background:none; text-align:left; white-space:normal; padding:4px 6px; font-weight:normal}
+.kv th{color:var(--mute); width:10em}
+.note{margin:16px 0 28px; padding:10px 12px; font-size:12px; line-height:1.8; color:var(--mute); background:var(--paper); border:1px solid var(--rule); border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>公募増資・売出一覧（公募・売出・第三者割当・自己株式処分）</h1>
+  <p class="sub">TDnetの適時開示から自動で集めています。<span id="gen"></span>　<a href="/">財務時系列へ</a>　<a href="/ms/">MSワラント一覧へ</a></p>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <input type="search" id="q" placeholder="会社名・コード・業種で絞り込み">
+    <select id="kind">
+      <option value="">すべての種類</option>
+      <option>公募</option><option>売出</option><option>第三者割当</option><option>自己株式処分</option>
+    </select>
+    <select id="mkt"><option value="">すべての市場</option></select>
+    <button class="btn" id="csv">CSVで保存</button>
+  </div>
+  <div class="count" id="count">読み込んでいます…</div>
+  <div class="tablewrap"><table id="tbl"></table></div>
+  <div class="note">
+    数字はお知らせの決まった言い回しから機械的に拾っています（AIには読ませていません）。拾えなかった項目は「—」です。行をクリックすると、もとのお知らせの一覧が出ます。<br>
+    条件決定日・受渡日は、価格等の決定のお知らせが出るまで<span class="plan">予定（灰色）</span>で、決定のお知らせが出たら確定日に置き換わります。第三者割当・自己株式処分は決議の時点で条件が決まっているので、条件決定日＝決議日です。<br>
+    OA＝オーバーアロットメントによる売出し（決定のお知らせが出た後は確定した株数）。「OA込」はOA分を含めた値です。OAに伴う第三者割当がある案件ではOA分を新株（希薄化）として、無い案件（グリーンシューオプション）では売出として数えます。<br>
+    議決権株式数＝有報の「議決権の状況」の議決権の個数×単元株式数（単元未満株・自己株式を除く）。希薄化率＝（新株＋自己株式処分）÷議決権株式数、売出の割合＝売出株式数÷議決権株式数。<br>
+    発行済株式数は、お知らせに「現在の発行済株式総数」があればその値、無ければ直近の有報の値です。自己株式数は直近の有報の値です。募集金額＝発行価格・売出価格・処分価額×株数（条件決定前は空欄）。<br>
+    出典：TDnet（東京証券取引所）の適時開示、JPXの上場銘柄一覧、EDINETの有価証券報告書。お知らせの本文は転載していません。必ず元の開示で確かめてください。
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const no = (v) => v === null || v === undefined || v === "";
+const int = (v) => no(v) ? "—" : Number(v).toLocaleString("ja-JP");
+const pct = (v) => no(v) ? "—" : `${Number(v).toFixed(2)}%`;
+const oku = (v) => no(v) ? "—" : (v / 1e8).toLocaleString("ja-JP", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const val = (v) => no(v) ? "—" : v;
+const tdnet = (id) => `https://www.release.tdnet.info/inbs/${id}.pdf`;
+let deals = [], openKey = null;
+const key = (d) => `${d.コード}-${d.決議日}`;
+
+// 条件決定日・受渡日：確定していなければ予定（灰色）
+const kettei = (d) => d.条件決定日 ? [d.条件決定日, false] : [d.条件決定日_予定 || "", true];
+const ukewatashi = (d) => {
+  const v = d.受渡日 || d.払込期日;
+  return v ? [v, d.状態 === "決議" && !!d.条件決定日_予定] : [d.受渡日_予定 || "", true];
+};
+
+// 一覧の列（順番はご指定どおり。OAの株数だけ、OA込の値の根拠として足している）
+const COLS = [
+  ["海外募集", (d) => d.海外募集 ? "有" : "", "l"],
+  ["コード", (d) => d.コード, "l"],
+  ["会社名", (d) => d.会社名, "l name"],
+  ["市場", (d) => val(d.市場), "l"],
+  ["業種", (d) => val(d.業種), "l"],
+  ["決議日", (d) => d.決議日, "l"],
+  ["条件決定日", (d) => kettei(d)[0] || "—", "l", (d) => kettei(d)[1]],
+  ["受渡日", (d) => ukewatashi(d)[0] || "—", "l", (d) => ukewatashi(d)[1]],
+  ["発行済株式数", (d) => int(d.発行済株式数)],
+  ["自己株式数", (d) => int(d.自己株式数)],
+  ["新株", (d) => int(d.新株)],
+  ["売出株式数", (d) => int(d.売出)],
+  ["自己株式処分数", (d) => int(d.処分)],
+  ["OA株数", (d) => int(d.OA), "oa"],
+  ["合計", (d) => int(d.合計_OA除く)],
+  ["合計（OA込）", (d) => int(d.合計_OA含む), "oa"],
+  ["希薄化率", (d) => pct(d.希薄化率_OA除く)],
+  ["希薄化率（OA込）", (d) => pct(d.希薄化率_OA含む), "oa"],
+  ["売出の割合", (d) => pct(d.売出の割合_OA除く)],
+  ["売出の割合（OA込）", (d) => pct(d.売出の割合_OA含む), "oa"],
+  ["募集金額（億円）", (d) => oku(d.募集金額_OA除く)],
+  ["募集金額（OA込・億円）", (d) => oku(d.募集金額_OA含む), "oa"],
+  ["資金使途", (d) => val(d.資金使途), "l wide"],
+  ["同時に開示したもの", (d) => (d.同時開示 || []).join(" ／ ") || "—", "l wide"],
+];
+
+function filtered() {
+  const q = $("q").value.trim().toLowerCase(), k = $("kind").value, m = $("mkt").value;
+  return deals.filter((d) => (!k || (d.種類 || "").includes(k)) && (!m || d.市場 === m)
+    && (!q || `${d.コード} ${d.会社名} ${d.業種 || ""}`.toLowerCase().includes(q)));
+}
+
+function detail(d) {
+  const kv = (rows) => `<table class="kv">${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("")}</table>`;
+  const notes = (d.お知らせ || []).map((n) => `<tr><th>${esc(n.日)}（${esc(n.種別)}）</th><td><a href="${tdnet(n.id)}" target="_blank" rel="noopener">${esc(n.表題)}</a></td></tr>`).join("");
+  return `<div class="dgrid">
+    <div><h4>条件</h4>${kv([
+      ["種類", esc(d.種類 || "—")],
+      ["状態", esc(d.状態 || "—")],
+      ["発行価格", d.発行価格 ? `${int(d.発行価格)}円` : "—"],
+      ["売出価格", d.売出価格 ? `${int(d.売出価格)}円` : "—"],
+      ["処分価額", d.処分価格 ? `${int(d.処分価格)}円` : "—"],
+      ["ディスカウント率", no(d.ディスカウント率) ? "—" : `${d.ディスカウント率}%`],
+      ["割当先", esc(d.割当先 || "—")],
+      ["議決権株式数", `${int(d.議決権株式数)}${d.議決権の基準 ? `（${esc(d.議決権の基準)}の有報）` : ""}`],
+      ["発行済株式数の基準", esc(d.株式数の基準 || "—")],
+    ])}</div>
+    <div><h4>お知らせ（TDnetの公開は約1か月）</h4><table class="kv">${notes}</table></div>
+    <div><h4>同時に開示したもの</h4>${(d.同時開示 || []).map((t) => `<div>${esc(t)}</div>`).join("") || "—"}</div>
+  </div>`;
+}
+
+function render() {
+  const list = filtered();
+  const head = `<tr>${COLS.map(([h, , c]) => `<th class="${c || ""}">${esc(h)}</th>`).join("")}</tr>`;
+  let body = "";
+  for (const d of list) {
+    body += `<tr class="deal${openKey === key(d) ? " open" : ""}" data-k="${esc(key(d))}">` + COLS.map(([h, f, c, plan]) => {
+      let v = esc(f(d));
+      if (plan && plan(d) && v !== "—") v = `<span class="plan">${v}（予定）</span>`;
+      if (h === "会社名") v += `<span class="tag">${esc(d.種類 || "")}</span>`;
+      // 長い文は2行で切る（全文は行をクリックした詳細とCSVで）
+      if ((c || "").includes("wide")) v = `<div class="clip" title="${esc(f(d))}">${v}</div>`;
+      return `<td class="${(c || "").replace("oa", "")}">${v}</td>`;
+    }).join("") + `</tr>`;
+    if (openKey === key(d)) body += `<tr class="detail"><td colspan="${COLS.length}">${detail(d)}</td></tr>`;
+  }
+  $("tbl").innerHTML = head + body;
+  $("count").textContent = list.length ? `${list.length}件` : "該当する案件はありません";
+  for (const tr of $("tbl").querySelectorAll("tr.deal")) {
+    tr.onclick = () => { openKey = openKey === tr.dataset.k ? null : tr.dataset.k; render(); };
+  }
+}
+
+function csv() {
+  // CSVは画面の表示ではなく元の値（円・株・%）で出す
+  const RAW = [
+    ["海外募集", (d) => d.海外募集 ? "有" : ""], ["コード", (d) => d.コード], ["会社名", (d) => d.会社名],
+    ["市場", (d) => d.市場], ["業種", (d) => d.業種], ["決議日", (d) => d.決議日],
+    ["条件決定日", (d) => kettei(d)[0] + (kettei(d)[1] && kettei(d)[0] ? "（予定）" : "")],
+    ["受渡日", (d) => ukewatashi(d)[0] + (ukewatashi(d)[1] && ukewatashi(d)[0] ? "（予定）" : "")],
+    ["発行済株式数", (d) => d.発行済株式数], ["自己株式数", (d) => d.自己株式数],
+    ["新株", (d) => d.新株], ["売出株式数", (d) => d.売出], ["自己株式処分数", (d) => d.処分], ["OA株数", (d) => d.OA],
+    ["合計", (d) => d.合計_OA除く], ["合計（OA込）", (d) => d.合計_OA含む],
+    ["希薄化率(%)", (d) => d.希薄化率_OA除く], ["希薄化率（OA込）(%)", (d) => d.希薄化率_OA含む],
+    ["売出の割合(%)", (d) => d.売出の割合_OA除く], ["売出の割合（OA込）(%)", (d) => d.売出の割合_OA含む],
+    ["募集金額(円)", (d) => d.募集金額_OA除く], ["募集金額（OA込）(円)", (d) => d.募集金額_OA含む],
+    ["資金使途", (d) => d.資金使途], ["同時に開示したもの", (d) => (d.同時開示 || []).join(" ／ ")],
+    ["種類", (d) => d.種類], ["状態", (d) => d.状態], ["発行価格", (d) => d.発行価格], ["売出価格", (d) => d.売出価格],
+    ["処分価額", (d) => d.処分価格], ["議決権株式数", (d) => d.議決権株式数],
+  ];
+  const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const lines = [RAW.map(([h]) => h).join(",")].concat(filtered().map((d) => RAW.map(([, f]) => q(f(d))).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `po_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+fetch("/po.json").then((r) => r.json()).then((j) => {
+  deals = j.deals || [];
+  $("gen").textContent = j.generated ? `更新：${j.generated.slice(0, 10)}` : "";
+  const mk = [...new Set(deals.map((d) => d.市場).filter(Boolean))].sort();
+  $("mkt").innerHTML += mk.map((m) => `<option>${esc(m)}</option>`).join("");
+  render();
+}).catch(() => { $("count").textContent = "一覧を読み込めませんでした。"; });
+for (const id of ["q", "kind", "mkt"]) $(id).addEventListener("input", render);
+$("csv").onclick = csv;
+</script>
+</body>
+</html>

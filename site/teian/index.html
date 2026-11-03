@@ -85,6 +85,8 @@
   .part h4 { font-size:13px; margin:0 0 4px; color:var(--accent); }
   .ai { white-space:pre-line; font-size:14px; }
   .ai.wait { color:var(--muted); font-size:13px; }
+  /* 有報の記載をそのまま出す欄。長い章（リスク・分析）は枠の中でスクロールする */
+  .ai.raw { max-height:28em; overflow:auto; padding:8px 10px; border:1px solid var(--line, #E3E8EF); border-radius:6px; font-size:13px; line-height:1.75; }
   .headline { font-size:16px; font-weight:600; margin:6px 0 10px; }
   td.mk { color:var(--muted); font-size:12px; white-space:nowrap; }
   .bar2 { display:inline-block; height:8px; background:var(--line2); vertical-align:middle; margin-right:6px; }
@@ -425,7 +427,7 @@ async function load() {
   renderShindan();
 }
 
-// ---- 有報の要約 ------------------------------------------------------------
+// ---- 有報の記載 ------------------------------------------------------------
 // 読み込んだ直後に、有報を章立ての順にまとめて見せる。数字の表は手元で組み、
 // 文章のパートはサーバーの要約（保存して使い回す）を取りに行って差し込む。
 // 会社を読み込み直したら、前の会社の要約が遅れて届いても捨てる（gaiyoToken）。
@@ -441,17 +443,17 @@ function renderGaiyo() {
   const kt = keyTable(ctx);
   const seg = segmentRows(ctx);
   const st = stockFacts(ctx);
-  const partBox = (p) => `<div class="part"><h4>${esc(p.title)}</h4><div class="ai wait" id="yh-${p.part}">要約を作っています…</div></div>`;
+  const partBox = (p) => `<div class="part"><h4>${esc(p.title)}</h4><div class="ai raw wait" id="yh-${p.part}">読み込んでいます…</div></div>`;
   const ch = (n, title, body) => `<details class="ch" open><summary>第${n} ${esc(title)}</summary>${body}</details>`;
 
   $("gaiyo").classList.remove("hide");
-  $("gaiyo").innerHTML = `<h2>有報の要約（${esc(ctx.name)}）</h2>
+  $("gaiyo").innerHTML = `<h2>有報の記載（${esc(ctx.name)}）</h2>
     <div class="headline" id="yh-head">${esc(ctx.name)}（${esc(ctx.code)}）</div>
     ${ch(1, "企業の概況",
       `<div class="part"><h4>主要な経営指標等の推移</h4>${tbl(kt.head, kt.rows)}
          ${kt.notes.length ? `<p class="note">${kt.notes.map(esc).join(" ")}</p>` : ""}</div>
        <div class="part"><h4>沿革</h4><div id="yh-hist" class="ai wait">${ctx.sec?.h ? "読み込んでいます…" : "沿革はまだ取得していない（全社に行き渡るまで約1週間）"}</div></div>
-       <div class="part"><h4>事業の内容</h4><div class="ai wait" id="yh-biz">要約を作っています…</div></div>
+       <div class="part"><h4>事業の内容</h4><div class="ai raw wait" id="yh-biz">読み込んでいます…</div></div>
        <div class="part"><h4>関係会社の状況</h4><div class="ai wait" id="yh-aff">${ctx.sec?.kb ? "読み込んでいます…" : "まだ取得していない（全社に行き渡るまで約1週間）"}</div></div>`)}
     ${ch(2, "事業の状況", TEXT_PARTS.filter((p) => p.chapter === 2).map(partBox).join(""))}
     ${ch(3, "設備の状況", TEXT_PARTS.filter((p) => p.chapter === 3).map(partBox).join(""))}
@@ -479,8 +481,7 @@ function renderGaiyo() {
         `<td><span class="bar2" style="width:${Math.round((g.share || 0) * 80)}px"></span>${pctS(g.share)}</td>` +
         `<td class="n">${g.profit === null ? "—" : Math.trunc(g.profit / 1e6).toLocaleString("ja-JP")}</td><td class="n">${pctS(g.margin)}</td></tr>`).join("") +
       `</table></div>` : `<p class="note">セグメント情報は取得できていない（単一セグメントの会社も多い）。</p>`)}
-    <p class="note">数字の表は有価証券報告書（EDINET）から機械的に作成。文章のパートは有報の記載をAIで要約したもの（数字は書かせていない）。
-      要約は保存して使い回すので、2回目以降はすぐ出る。</p>`;
+    <p class="note">数字の表は有価証券報告書（EDINET）から機械的に作成。文章のパートは有報の記載をそのまま載せている（AIの要約は使っていない）。</p>`;
   fillGaiyo(my);
 }
 
@@ -560,26 +561,20 @@ async function fillGaiyo(my) {
       }
     } catch { /* 下の要約は続ける */ }
   }
-  // 事業の内容（既存の要約）。1行目の【全体】は見出しにも出す。
-  try {
-    const r = await fetch(`${API}/api/summarize?code=${encodeURIComponent(code)}`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || "");
-    const txt = String(j.summary || "");
-    const head = /【全体】\s*\n?([^\n]+)/.exec(txt);
-    if (head && my === gaiyoToken) $("yh-head").textContent = `${ctx.name}（${ctx.code}）：${head[1].trim()}`;
-    put("yh-biz", txt.replace(/【全体】\s*\n?[^\n]+\n*/, "").trim());
-  } catch (e) { put("yh-biz", e.message || "要約を取得できなかった。", true); }
-  // 文章のパート。順番に取りに行く（並行に投げると上限を一度に使い切るため）。
+  // 文章の章は、AIで要約せずに有報の記載をそのまま出す（本人の指定。2026-11-03）。
+  // 材料はこのサイトが配信しているもの：事業の内容・配当政策は /s、経営方針・分析・設備は /context、リスクは /risk。
+  const base = DATA || "";
+  put("yh-biz", String(ctx.sec?.biz?.[0]?.[0] || "").trim() || "事業の内容はまだ取得していない。", !ctx.sec?.biz?.[0]?.[0]);
+  let cx = {}, risk = "";
+  try { const r = await fetch(`${base}/context/${code}.json`); if (r.ok) cx = await r.json(); } catch { /* 無ければ下で「未取得」 */ }
+  try { const r = await fetch(`${base}/risk/${code}.txt`); if (r.ok) risk = await r.text(); } catch { /* 同上 */ }
+  const raw = { policy: cx.policy, risk, mdna: cx.analysis, facilities: cx.facilities, dividend: ctx.sec?.div?.[0]?.[0] };
   for (const p of TEXT_PARTS) {
-    if (my !== gaiyoToken) return;
-    try {
-      const r = await fetch(`${API}/api/yuho?code=${encodeURIComponent(code)}&part=${p.part}`);
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "");
-      put(`yh-${p.part}`, j.summary);
-    } catch (e) { put(`yh-${p.part}`, e.message || "要約を取得できなかった。", true); }
+    // 改行コードの混在（リスクの本文は CRLF）で空行が倍になるので詰める
+    const t = String(raw[p.part] || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    put(`yh-${p.part}`, t || `「${p.title}」はまだ取得していない。`, !t);
   }
+
 }
 
 /** 画面の入力を ctx に写す。診断と提案書の両方がこれを読む。 */

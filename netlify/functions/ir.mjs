@@ -348,14 +348,25 @@ function fromXML(text) {
 }
 
 /** 次にたどる先。同じ会社のIRページと、IR用のJS。 */
-function nextLinks(text, base, isHTML) {
+function nextLinks(text, base, isHTML, code) {
   const host = new URL(base).hostname;
   const out = [];
   const add = (raw) => {
-    const u = safeURL(raw, base);
+    // 配信元の http://v4.eir-parts.net は https の ssl4 と同じ中身
+    const u = safeURL(String(raw).replace(/^(?:https?:)?\/\/v4\.eir-parts\.net\//i, "https://ssl4.eir-parts.net/"), base);
     if (u) out.push(u.toString());
   };
   if (isHTML) {
+    // E-IRの部品を document.write で組み立てて読み込む会社がある（エスプール2471）。
+    //   eirUrl + '/Custom/public/parts/' + eirCode + '/ja_20200325/parts/' ＋ "irnews.js"
+    // URLが文字列のまま書かれていないので、置き場と読み込むJSの名前から組み立て直す。
+    // この部品の中に、資料一覧（announcement_20.js など番号が会社ごとに違う）のURLが書かれている。
+    const dir = /\/Custom\/public\/parts\/['"]\s*\+\s*\w+\s*\+\s*['"]\/?([^'"]*\/parts\/)['"]/.exec(text);
+    if (dir && /^[0-9A-Za-z]{4}$/.test(code || "")) {
+      for (const m of text.matchAll(/eirPass\s*\+\s*["']([\w.\-]+\.js)/g)) {
+        add(`https://ssl4.eir-parts.net/Custom/public/parts/${code}/${dir[1]}${m[1]}`);
+      }
+    }
     // IR用のJS。ここに配信元のURLが書かれている。
     const s = /<script\b[^>]*src=["']([^"']+\.js[^"']*)["']/gi;
     let m;
@@ -489,9 +500,11 @@ export default async (req) => {
     }
 
     if (depth < 2) {
-      for (const u of nextLinks(text, r.url, isHTML)) {
+      for (const u of nextLinks(text, r.url, isHTML, code)) {
         if (visited.includes(u) || queue.some((q) => q.url === u)) continue;
-        queue.push({ url: u, depth: depth + 1 });
+        // 配信元のJSは、その先（資料一覧）まで必ずたどる。深さに数えない。
+        const eir = /eir-parts\.net\//i.test(u);
+        queue.push({ url: u, depth: eir ? 0 : depth + 1, sibling: eir || undefined });
       }
       // 点数の高いものから見に行く。浅いほうを少し優先する。
       // 配信元の兄弟は確実に当たるので、いちばん前に置く。

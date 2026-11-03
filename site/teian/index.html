@@ -447,6 +447,7 @@ async function load() {
   recalcStable();
   renderGaiyo();
   renderShindan();
+  loadTdnet(code);
 }
 
 // ---- 有報の記載 ------------------------------------------------------------
@@ -592,7 +593,7 @@ async function fillGaiyo(my) {
   try { const r = await fetch(`${base}/risk/${code}.txt`); if (r.ok) risk = await r.text(); } catch { /* 同上 */ }
   const raw = { policy: cx.policy, risk, mdna: cx.analysis, facilities: cx.facilities, dividend: ctx.sec?.div?.[0]?.[0] };
   // 施策のチェック表は「M&A」「提携」「成長投資」の記載を経営方針・分析から見る
-  if (my === gaiyoToken) { ctx.texts = { policy: cx.policy, mdna: cx.analysis }; renderShindan(); }
+  if (my === gaiyoToken) { ctx.texts = { ...(ctx.texts || {}), policy: cx.policy, mdna: cx.analysis }; renderShindan(); }
   for (const p of TEXT_PARTS) {
     // 改行コードの混在（リスクの本文は CRLF）で空行が倍になるので詰める
     const t = String(raw[p.part] || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -632,6 +633,32 @@ function bizTableHTML() {
     `</table></div><p class="note">${(pg.notes || []).map(esc).join(" ")}</p>`;
 }
 
+/** 適時開示の表題（直近2年）。民間API（やのしん）から /api/tdnet 経由で取る。 */
+function tdnetHTML() {
+  const t = ctx.tdnetState;
+  if (!t) return "";
+  if (t.error) return `<p class="note">適時開示（直近2年）：${esc(t.error)}</p>`;
+  if (!t.items) return `<p class="note">適時開示（直近2年）を読み込んでいます…</p>`;
+  return `<details class="ck"><summary><b>適時開示（直近2年・${t.items.length}件）</b></summary>
+    <table>${t.items.map((x) => `<tr><td style="width:7em">${esc(x.date)}</td><td>${esc(x.title)}</td></tr>`).join("")}</table>
+    <p class="note">表題は民間の無料API（やのしん TDnet WEB-API、公式ではない）から。TDnetのPDFは約1か月で消えるため、本文は会社のIRページで確かめる。</p></details>`;
+}
+
+async function loadTdnet(code) {
+  ctx.tdnetState = {};
+  try {
+    const r = await fetch(`${API}/api/tdnet?code=${encodeURIComponent(code)}`);
+    const j = await r.json();
+    if (!ctx || ctx.code !== code) return;
+    ctx.tdnetState = r.ok ? { items: j.items || [] } : { error: j.error || "取れませんでした" };
+  } catch {
+    if (!ctx || ctx.code !== code) return;
+    ctx.tdnetState = { error: "つながりませんでした" };
+  }
+  ctx.texts = { ...(ctx.texts || {}), tdnet: ctx.tdnetState.items || [] };
+  renderShindan();
+}
+
 function renderShindan() {
   if (!ctx) return;
   readInputs();
@@ -655,7 +682,8 @@ function renderShindan() {
         <label class="pick" onclick="event.stopPropagation()"><input type="checkbox" data-pick="${esc(r.id)}"${ctx.picked.has(r.id) ? " checked" : ""}> 検討する</label></summary>
       <table>${r.checks.map((c) => `<tr><td class="h">${mark(c.hit)}</td><td>${esc(c.label)}</td><td>${esc(c.value)}</td><td class="note">${esc(c.rule)}</td></tr>`).join("")}</table>
       <p class="note">${esc(r.note)}${r.missing.length ? `　値が無い条件：${r.missing.map(esc).join("、")}` : ""}</p>
-    </details>`).join("") +
+      ${r.related?.length ? `<p class="note">関係する適時開示（直近2年）：${r.related.map((x) => `${esc(x.date)} ${esc(x.title)}`).join("／")}</p>` : ""}
+    </details>`).join("") + tdnetHTML() +
     `<p class="note">株価・市場区分を入れると、時価総額・PBR・流通株式の判定が変わります。基準の数字（PBR 1倍、ROE 8%など）は初期値で、直せます。` +
     `大量保有報告書・2年分の適時開示・長期ビジョンはまだ材料に入っていません。</p>`;
   for (const cb of $("shindan").querySelectorAll("input[data-pick]")) {

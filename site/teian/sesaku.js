@@ -32,6 +32,21 @@ export const THRESHOLDS = {
 };
 
 const T = THRESHOLDS;
+
+// 施策に関係する適時開示の表題（直近2年）。判定には使わず、根拠として並べる。
+export const RELATED = {
+  buyback: /自己株式(?:の)?取得|自社株買い|株主還元|配当(?:方針|予想の修正)|増配/,
+  secondary: /売出し|売出価格|主要株主|筆頭株主|その他の関係会社の異動/,
+  float: /流通株式|上場維持基準|市場区分|売出し|立会外分売/,
+  po: /新株式発行|公募|発行価格|調達資金|資金使途/,
+  ms: /新株予約権(?!.*ストック)|行使価額修正|行使状況|MSワラント/,
+  treasury: /自己株式(?:の)?処分/,
+  alliance: /資本業務提携|業務提携|資本提携|第三者割当/,
+  ma: /株式の取得|子会社化|株式交付|吸収合併|事業譲受|買収|M&A/,
+  activist: /株主提案|大量保有|買集め|株主との対話|資本コスト|株価を意識した経営/,
+  crosshold: /政策保有|投資有価証券(?:の)?売却/,
+  owner: /主要株主|筆頭株主|資産管理|事業承継|代表取締役の異動/,
+};
 const pct = (v, d = 1) => v === null || v === undefined ? "—" : `${(v * 100).toFixed(d)}%`;
 const oku = (v) => v === null || v === undefined ? "—" : `${(v / 1e8).toFixed(1)}億円`;
 const x2 = (v) => v === null || v === undefined ? "—" : `${v.toFixed(2)}倍`;
@@ -81,8 +96,10 @@ export function checklist(ctx, pf = profile(ctx), texts = {}) {
 
   const out = [];
   const add = (id, name, checks, core, note) => {
+    const re = RELATED[id];
+    const related = re ? (texts.tdnet || []).filter((x) => re.test(x.title || "")).slice(0, 8) : [];
     out.push({ id, name, verdict: verdictOf(checks, core), checks,
-      missing: checks.filter((c) => c.hit === null).map((c) => c.label), note });
+      missing: checks.filter((c) => c.hit === null).map((c) => c.label), note, related });
   };
 
   // 1. 自社株買い（還元・資本効率）

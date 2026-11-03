@@ -448,6 +448,7 @@ async function load() {
   renderGaiyo();
   renderShindan();
   loadTdnet(code);
+  loadIRNow(code);
 }
 
 // ---- 有報の記載 ------------------------------------------------------------
@@ -673,7 +674,7 @@ function renderShindan() {
     `<div class="facts">${keyFacts(pf).map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>` +
     (big ? `<p class="note"><b>時価総額が1,000億円を超えています</b>（対象の規模の外）。</p>` : "") +
     `<h3>業績（有報・決算短信・中期経営計画）</h3>` + bizTableHTML() +
-    `<p class="row" style="margin:4px 0 12px"><button id="irnow" class="ghost">決算短信・中計をIRから読み込んで今期を足す</button><span id="irnowmsg" class="note"></span></p>` +
+    `<p class="row" style="margin:4px 0 12px"><button id="irnow" class="ghost">決算短信・中計をIRから読み込んで今期を足す</button><span id="irnowmsg" class="note">${esc(ctx.irMsg || "")}</span></p>` +
     `<h3>施策のチェック表</h3>` +
     `<p class="note">施策ごとに、条件・この会社の値・満たすか（○×、？は値が無い）を並べています。判定は数字の条件だけで出したもので、判断ではありません。` +
     `検討する施策にチェックを入れてください（資料の型は今はMSワラントのみ。他の施策は順に足します）。</p>` +
@@ -689,16 +690,26 @@ function renderShindan() {
   for (const cb of $("shindan").querySelectorAll("input[data-pick]")) {
     cb.onchange = () => { cb.checked ? ctx.picked.add(cb.dataset.pick) : ctx.picked.delete(cb.dataset.pick); };
   }
-  $("irnow").onclick = async () => {
-    $("irnow").disabled = true;
-    try {
-      ctx.irAutoDone = false;
-      await autoTanshin();
-      readTanshin(true);
-      fillChukei();
-      $("irnowmsg").textContent = $("gomsg").textContent;
-    } finally { renderShindan(); }
-  };
+  $("irnow").disabled = !!ctx.irBusy;
+  $("irnow").onclick = () => loadIRNow(ctx.code);
+}
+
+/** 決算短信・中計をIRから読み込んで、業績表の今期の列を足す。読み込んだときに1回は自動で走る。 */
+async function loadIRNow(code) {
+  if (!ctx || ctx.irBusy) return;
+  ctx.irBusy = true;
+  ctx.irMsg = "決算短信・中計をIRから探しています（30秒ほど）…";
+  renderShindan();
+  try {
+    ctx.irAutoDone = false;
+    await autoTanshin();
+    if (!ctx || ctx.code !== code) return;
+    readTanshin(true);
+    fillChukei();
+    ctx.irMsg = $("gomsg").textContent;
+  } finally {
+    if (ctx && ctx.code === code) { ctx.irBusy = false; renderShindan(); }
+  }
 }
 for (const id of ["price", "seg"]) $(id).addEventListener("change", renderShindan);
 

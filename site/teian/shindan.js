@@ -124,10 +124,17 @@ function officerShares(rows) {
 /** 所有者別状況。[区分, 株主数, 株式数(単元), 比率%] */
 function ownRows(rows) {
   if (!rows) return [];
-  return rows.map((r) => ({
-    category: String(r[0] || "").trim(),
-    ratio: num(r[3]) === null ? null : num(r[3]) / 100,
-  })).filter((r) => r.category && r.ratio !== null && !/^計$|単元未満/.test(r.category));
+  // 割合の列が空の会社がある（エスプール2471：区分・株主数・所有株式数（単元）だけ）。
+  // そのときは所有株式数（単元）を「計」の行で割って出す。
+  const total = num((rows.find((r) => /^計$/.test(String(r[0] || "").trim())) || [])[2]);
+  return rows.map((r) => {
+    const pctCol = num(r[3]);
+    const units = num(r[2]);
+    return {
+      category: String(r[0] || "").trim(),
+      ratio: pctCol !== null ? pctCol / 100 : (units !== null && total ? units / total : null),
+    };
+  }).filter((r) => r.category && r.ratio !== null && !/^計$|単元未満/.test(r.category));
 }
 
 // ---- 会社の数字をまとめる ------------------------------------------------

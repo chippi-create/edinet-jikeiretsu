@@ -52,7 +52,7 @@ function figures(line) {
  * そこで、率は必ず小数か整数の百分率であることを使って、
  * 「金額らしい大きい数」を4つ拾う。
  */
-function pickFour(line) {
+function pickFour(line, n = 4) {
   const cells = norm(line).split(" ").filter(Boolean);
   const nums = [];
   for (const c of cells) {
@@ -64,7 +64,19 @@ function pickFour(line) {
   const vals = nums.filter((n) => n.v !== null);
   // カンマ付き（＝1,000以上の金額）か、小数点を持たない整数を金額とみなす。
   const money = vals.filter((n) => n.comma || !n.dot).map((n) => n.v);
-  return money.length >= 4 ? money.slice(0, 4) : null;
+  return money.length >= n ? money.slice(0, n) : null;
+}
+
+/**
+ * 4つの金額を 売上高・営業利益・経常利益・純利益 に当てる。
+ * IFRSの短信は「売上収益・営業利益・税引前利益・(四半期/当期)利益・親会社の所有者に帰属する利益」と5つ並ぶ。
+ * 4つ目は非支配持分を含むので、純利益には5つ目（親会社の所有者に帰属）を使う（エスプール2471）。
+ * 経常利益の欄には税引前利益が入る。
+ */
+function pl(line, ifrs) {
+  const f = ifrs ? pickFour(line, 5) || pickFour(line) : pickFour(line);
+  if (!f) return null;
+  return { 売上高: f[0], 営業利益: f[1], 経常利益: f[2], 純利益: f[ifrs && f.length >= 5 ? 4 : 3] };
 }
 
 /**
@@ -75,6 +87,7 @@ export function parseTanshin(text) {
   if (!text) return null;
   const lines = String(text).split(/\r?\n/);
   const flat = norm(text);
+  const ifrs = /税引前/.test(flat) && /親会社の\s*所有者に\s*帰属/.test(flat);
 
   const out = {
     company: null, code: null, period: null, quarter: null,
@@ -111,9 +124,9 @@ export function parseTanshin(text) {
     for (let i = fi; i < Math.min(lines.length, after ? fi + 20 : 200); i++) {
       if (/^\s*通\s*期/.test(norm(lines[i])) && !pickFour(lines[i])) continue;
       if (!/^\s*通\s*期/.test(norm(lines[i]))) continue;
-      const f = pickFour(lines[i]);
+      const f = pl(lines[i], ifrs);
       if (f) {
-        out.forecast = { 売上高: f[0], 営業利益: f[1], 経常利益: f[2], 純利益: f[3] };
+        out.forecast = f;
         // 行末の小数が1株当たり当期純利益（「… 137 32.8 11.34」）。金額が4つ並んだ後にあるときだけ。
         const cells = norm(lines[i]).split(" ").filter(Boolean);
         const last = cells[cells.length - 1];
@@ -126,8 +139,8 @@ export function parseTanshin(text) {
     // 第2四半期（累計）の予想。上期の進捗を見るのに使う。出していない会社も多い。
     for (let i = fi; i < Math.min(lines.length, after ? fi + 20 : 200); i++) {
       if (!/^\s*第\s*2\s*四\s*半\s*期\s*\(累計\)/.test(norm(lines[i]))) continue;
-      const f = pickFour(lines[i]);
-      if (f) out.halfForecast = { 売上高: f[0], 営業利益: f[1], 経常利益: f[2], 純利益: f[3] };
+      const f = pl(lines[i], ifrs);
+      if (f) out.halfForecast = f;
       break;
     }
   }
@@ -138,25 +151,21 @@ export function parseTanshin(text) {
     for (let i = ai; i < Math.min(lines.length, ai + 20); i++) {
       const l = norm(lines[i]);
       if (!/^\s*\d{4}年\s*\d{1,2}月期\s*(第\d四半期|中間期|通期)?/.test(l)) continue;
-      const f = pickFour(lines[i]);
+      const f = pl(lines[i], ifrs);
       if (f) {
-        out.actual = { 期: l.split(" ")[0], 売上高: f[0], 営業利益: f[1],
-                       経常利益: f[2], 純利益: f[3] };
+        out.actual = { 期: l.split(" ")[0], ...f };
         // 次の行が前年同期。順調かどうかは、前年の同じ時点と比べないと言えない
         // （季節性がある会社は、1Qで25%に届かないのが普通のことがある）。
         const nx = lines[i + 1] ? norm(lines[i + 1]) : "";
-        const pf = /^\s*\d{4}年\s*\d{1,2}月期/.test(nx) ? pickFour(lines[i + 1]) : null;
-        if (pf) {
-          out.prior = { 期: nx.trim().split(" ")[0], 売上高: pf[0], 営業利益: pf[1],
-                        経常利益: pf[2], 純利益: pf[3] };
-        }
+        const pf = /^\s*\d{4}年\s*\d{1,2}月期/.test(nx) ? pl(lines[i + 1], ifrs) : null;
+        if (pf) out.prior = { 期: nx.trim().split(" ")[0], ...pf };
       }
       break;
     }
   }
 
   // 1株当たり四半期純利益（実績）。見出しの後ろで、年月期で始まる最初の行の最初の数字。
-  const ei = lines.findIndex((l) => /1株当たり/.test(norm(l)) && /純利益/.test(norm(lines[lines.indexOf(l) + 1] || "") + norm(l)));
+  const ei = lines.findIndex((l) => /1株当たり/.test(norm(l)) && /純利益|四半期利益|当期利益/.test(norm(lines[lines.indexOf(l) + 1] || "") + norm(l)));
   if (ei >= 0 && ai >= 0) {
     for (let i = ei; i < Math.min(lines.length, ei + 8); i++) {
       const l = norm(lines[i]);

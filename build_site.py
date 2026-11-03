@@ -283,6 +283,15 @@ def main():
         with open(os.path.join(SITE, "ms", "index.html"), "w", encoding="utf-8") as f:
             f.write(page)
 
+    # 市場区分・業種（po.py が週1でJPXから取る data/jpx.json）。提案書ツールが市場区分を自動で入れるのに使う
+    jpx_src = os.path.join(HERE, "data", "jpx.json")
+    if os.path.exists(jpx_src):
+        with open(jpx_src, encoding="utf-8") as f:
+            jp = json.load(f)
+        jp = {k: {"市場": v.get("市場"), "業種": v.get("業種")} for k, v in jp.items() if not k.startswith("_")}
+        with open(os.path.join(SITE, "jpx.json"), "w", encoding="utf-8") as f:
+            json.dump(jp, f, ensure_ascii=False, separators=(",", ":"))
+
     # 公募増資・売出一覧（po.py が作る data/po.json と、ページ po.html）
     po_src = os.path.join(HERE, "data", "po.json")
     if os.path.exists(po_src):

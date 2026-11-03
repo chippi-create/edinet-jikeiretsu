@@ -95,6 +95,20 @@
   .issue .sc { color:var(--muted); font-weight:normal; font-size:12px; margin-left:6px; }
   .issue .pr { margin:4px 0 0; font-size:13px; }
   .facts { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; margin:4px 0 8px; }
+  /* 施策のチェック表 */
+  .ck { border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin:6px 0; }
+  .ck summary { cursor:pointer; font-size:14px; }
+  .ck .vd { display:inline-block; min-width:7.5em; font-size:12px; padding:1px 6px; border-radius:4px; margin-right:8px; text-align:center; border:1px solid var(--line2); }
+  .ck .vd.y { background:#E6F4EA; border-color:#7CB98B; color:#1E5631; }
+  .ck .vd.p { background:#FFF4E5; border-color:#F0C27B; color:#7A4B00; }
+  .ck .vd.u { background:#F1F3F5; color:var(--muted); }
+  .ck .vd.n { color:var(--muted); }
+  .ck table { width:100%; margin-top:6px; font-size:13px; }
+  .ck td.h { width:2em; text-align:center; }
+  .ck .pick { float:right; font-size:12px; color:var(--muted); }
+  .ck .pick input { width:auto; margin:0 4px 0 0; vertical-align:middle; }
+  .biz th, .biz td { font-size:12px; padding:3px 6px; white-space:nowrap; }
+  .bizwrap { overflow-x:auto; }
   .facts span b { font-weight:600; }
   select {
     background:var(--field); color:var(--fg); border:1px solid var(--line2);
@@ -131,8 +145,9 @@
   <div id="loadmsg" class="ok"></div>
 </div>
 <div id="basis" class="card hide"></div>
-<div id="gaiyo" class="hide"></div>
+<!-- 分析（業績表・施策のチェック表）を先に、有報の記載はその後に -->
 <div id="shindan" class="hide"></div>
+<div id="gaiyo" class="hide"></div>
 
 <div id="step2" class="hide">
   <h2>2. 安定株主を選ぶ</h2>
@@ -234,10 +249,11 @@ import { buildProposal, shareholders, stableRatio, pageText, countTodo } from ".
 import { checkBasis, maxDilutionFor } from "./sim.js";
 import { parseTanshin, parseTanshinAll, tanshinLine } from "./tanshin.js";
 import { profile, diagnose, keyFacts, corpCore } from "./shindan.js";
+import { checklist } from "./sesaku.js";
 import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
-import { currentTerm } from "./genjo.js";
+import { currentTerm, pageBiz } from "./genjo.js";
 import { decodeCsv, parsePrices, trendOf } from "./kabuka.js";
 import { findChukei } from "./chukei.js";
 
@@ -363,10 +379,16 @@ async function load() {
     market: {}, dilution: 0.131,
   };
 
+  // 市場区分・業種（JPXの上場銘柄一覧。公開サイトが週1で取り直している）。選んでいなければ入れる。
+  const jp = await loadJpx();
+  ctx.jpx = jp[code] || null;
+  if (ctx.jpx?.市場 && !$("seg").value && [...$("seg").options].some((o) => o.value === ctx.jpx.市場)) $("seg").value = ctx.jpx.市場;
+
   const chk = checkBasis(ctx.basis);
   $("basis").classList.remove("hide");
   $("basis").innerHTML =
     `<b>${esc(meta.n)}</b>（${code}） ${esc(meta.e || "")} / ${esc(meta.k || "")}` +
+    (ctx.jpx ? `　${esc(ctx.jpx.市場 || "")}・${esc(ctx.jpx.業種 || "")}` : "") +
     `<table style="width:auto;margin-top:6px">
       <tr><td>発行済株式数</td><td class="n">${fmt(issued)}</td></tr>
       <tr><td>議決権株式数</td><td class="n">${fmt(voting)}</td></tr>
@@ -569,6 +591,8 @@ async function fillGaiyo(my) {
   try { const r = await fetch(`${base}/context/${code}.json`); if (r.ok) cx = await r.json(); } catch { /* 無ければ下で「未取得」 */ }
   try { const r = await fetch(`${base}/risk/${code}.txt`); if (r.ok) risk = await r.text(); } catch { /* 同上 */ }
   const raw = { policy: cx.policy, risk, mdna: cx.analysis, facilities: cx.facilities, dividend: ctx.sec?.div?.[0]?.[0] };
+  // 施策のチェック表は「M&A」「提携」「成長投資」の記載を経営方針・分析から見る
+  if (my === gaiyoToken) { ctx.texts = { policy: cx.policy, mdna: cx.analysis }; renderShindan(); }
   for (const p of TEXT_PARTS) {
     // 改行コードの混在（リスクの本文は CRLF）で空行が倍になるので詰める
     const t = String(raw[p.part] || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -592,28 +616,61 @@ function readInputs() {
 }
 
 /**
- * この会社で何が論点になりそうかを、数字の条件でざっくり並べる。
- * MSワラントに入る前の入口。判断ではなく材料なので、根拠の数字を全部出す。
+ * この会社の分析。業績の表と、施策のチェック表（sesaku.js）。
+ * MSワラントありきをやめ、まず施策を並べて本人が選ぶ（2026-11-03）。判断ではなく材料なので、条件と値を全部出す。
  */
+function bizTableHTML() {
+  let pg;
+  try { pg = pageBiz(ctx); } catch { return ""; }
+  const t = pg.tables?.[0];
+  if (!t) return "";
+  const groups = (t.groups || []).map((g) => `<th colspan="${g.span}">${esc(g.text)}</th>`).join("");
+  return `<div class="bizwrap"><table class="biz">` +
+    (groups ? `<tr>${groups}</tr>` : "") +
+    `<tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+    t.rows.map((r) => `<tr>${r.map((c, i) => i ? `<td class="n">${esc(c)}</td>` : `<th style="text-align:left">${esc(c)}</th>`).join("")}</tr>`).join("") +
+    `</table></div><p class="note">${(pg.notes || []).map(esc).join(" ")}</p>`;
+}
+
 function renderShindan() {
   if (!ctx) return;
   readInputs();
   const pf = profile(ctx);
-  const issues = diagnose(ctx, pf);
+  const rows = checklist(ctx, pf, ctx.texts || {});
   const big = pf.mcap && pf.mcap > 1000e8;
+  ctx.picked = ctx.picked || new Set();
+  const cls = { "当てはまる": "y", "一部当てはまる": "p", "材料不足": "u", "当てはまらない": "n" };
+  const mark = (h) => h === true ? "○" : h === false ? "×" : "？";
   $("shindan").classList.remove("hide");
-  $("shindan").innerHTML = `<h2>この会社の論点（ざっくり）</h2>` +
+  $("shindan").innerHTML = `<h2>この会社の分析</h2>` +
     `<div class="facts">${keyFacts(pf).map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>` +
     (big ? `<p class="note"><b>時価総額が1,000億円を超えています</b>（対象の規模の外）。</p>` : "") +
-    (issues.length ? issues.map((i) => `<div class="issue">
-        <h4>${esc(i.title)}<span class="sc">${"●".repeat(i.score)}${"○".repeat(Math.max(0, 3 - i.score))}</span></h4>
-        <ul>${i.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
-        <p class="pr">候補：${i.products.map(esc).join(" ／ ")}</p>
-        <p class="note">${esc(i.note)}</p></div>`).join("")
-      : `<p class="note">数字の条件に当たる論点はありませんでした（資本効率・流通株式・大株主・政策保有・資金需要を見ています）。</p>`) +
-    `<p class="note">有報の数字に条件を当てて並べたものです。●は当たった条件の数で、強さの目安です。` +
-    `会社が持っている政策保有株は2026年10月上旬まで取得の途中で、「未取得」の会社はまだ判定していません。` +
-    `株価・市場区分を入れると、時価総額・PBR・流通株式の判定が変わります。</p>`;
+    `<h3>業績（有報・決算短信・中期経営計画）</h3>` + bizTableHTML() +
+    `<p class="row" style="margin:4px 0 12px"><button id="irnow" class="ghost">決算短信・中計をIRから読み込んで今期を足す</button><span id="irnowmsg" class="note"></span></p>` +
+    `<h3>施策のチェック表</h3>` +
+    `<p class="note">施策ごとに、条件・この会社の値・満たすか（○×、？は値が無い）を並べています。判定は数字の条件だけで出したもので、判断ではありません。` +
+    `検討する施策にチェックを入れてください（資料の型は今はMSワラントのみ。他の施策は順に足します）。</p>` +
+    rows.map((r) => `<details class="ck"${r.verdict === "当てはまる" ? " open" : ""}>
+      <summary><span class="vd ${cls[r.verdict]}">${esc(r.verdict)}</span><b>${esc(r.name)}</b>
+        <label class="pick" onclick="event.stopPropagation()"><input type="checkbox" data-pick="${esc(r.id)}"${ctx.picked.has(r.id) ? " checked" : ""}> 検討する</label></summary>
+      <table>${r.checks.map((c) => `<tr><td class="h">${mark(c.hit)}</td><td>${esc(c.label)}</td><td>${esc(c.value)}</td><td class="note">${esc(c.rule)}</td></tr>`).join("")}</table>
+      <p class="note">${esc(r.note)}${r.missing.length ? `　値が無い条件：${r.missing.map(esc).join("、")}` : ""}</p>
+    </details>`).join("") +
+    `<p class="note">株価・市場区分を入れると、時価総額・PBR・流通株式の判定が変わります。基準の数字（PBR 1倍、ROE 8%など）は初期値で、直せます。` +
+    `大量保有報告書・2年分の適時開示・長期ビジョンはまだ材料に入っていません。</p>`;
+  for (const cb of $("shindan").querySelectorAll("input[data-pick]")) {
+    cb.onchange = () => { cb.checked ? ctx.picked.add(cb.dataset.pick) : ctx.picked.delete(cb.dataset.pick); };
+  }
+  $("irnow").onclick = async () => {
+    $("irnow").disabled = true;
+    try {
+      ctx.irAutoDone = false;
+      await autoTanshin();
+      readTanshin(true);
+      fillChukei();
+      $("irnowmsg").textContent = $("gomsg").textContent;
+    } finally { renderShindan(); }
+  };
 }
 for (const id of ["price", "seg"]) $(id).addEventListener("change", renderShindan);
 
@@ -922,6 +979,16 @@ function fillChukei() {
 
 /** 上場会社の名前の一覧（大株主の事業法人が上場会社かを見る）。1回だけ読む。 */
 let listedNames = null;
+let jpxCache = null;
+async function loadJpx() {
+  if (jpxCache) return jpxCache;
+  try {
+    const r = await fetch(DATA ? `${DATA}/jpx.json` : "/jpx.json");
+    jpxCache = r.ok ? await r.json() : {};
+  } catch { jpxCache = {}; }
+  return jpxCache;
+}
+
 async function loadListed() {
   if (listedNames) return listedNames;
   try {

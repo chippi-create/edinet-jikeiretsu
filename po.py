@@ -39,7 +39,7 @@ JPX_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001v
 # 何日さかのぼって一覧を見るか。TDnetの公開は約1か月なので、それより前は取れない。
 PO_DAYS = int(os.environ.get("PO_DAYS", "4") or 4)
 # 読み取りの版。読み方を直したら変える。版が違うお知らせは、PDFが残っていれば読み直す。
-PARSE_VERSION = "2026-11-03d"
+PARSE_VERSION = "2026-11-03e"
 
 INC = r"売出|新株式発行|新株式の発行|募集株式|自己株式の処分|自己株式処分|第三者割当|公募|発行価格|海外募集"
 # 新株予約権（MSワラントは別の一覧）、株式報酬・従業員向け、子会社の増資、種類株式、IPO・立会外分売は外す
@@ -249,7 +249,8 @@ def build():
             d["同時開示"] = sorted(set(d["同時開示"]) | set(n.get("同時開示") or []))
             d["お知らせ"].append({"id": n["id"], "日": n["日"], "表題": n["表題"], "種別": kind})
             # 第三者割当・自己株式処分は決議の時点で価格が決まっている
-            if re.search(r"第三者割当|自己株式の?処分", n["表題"]) and not n.get("OA"):
+            # 市場外の相対取引による売出しも、価格は決議（連絡）の時点で決まっている
+            if (re.search(r"第三者割当|自己株式の?処分", n["表題"]) or n.get("市場外")) and not n.get("OA"):
                 d["条件決定日"] = d["決議日"]
             continue
         d = find(n)

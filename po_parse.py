@@ -118,7 +118,8 @@ def parse(raw, title):
         k = None
         if re.search(SKIP_HEAD, re.sub(r"\([^)]*\)", "", h)):
             continue
-        if re.search(r"オーバーアロットメント", h):
+        # 見出しの括弧が改行で切れることがある（「当社株式の売出し」＋次の行「(オーバーアロットメントによる売出し)」）
+        if re.search(r"オーバーアロットメント", h) or ("(" not in h and re.match(r"\s*\(?\s*オーバーアロットメント", s)):
             k = "OA"
         elif re.search(r"海外募集", h):
             k = "海外"

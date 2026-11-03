@@ -12,6 +12,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 
+// APIが返したエラーの理由（キーや送った本文は含まれない）。400の原因を画面で分かるようにする
+const why = (e) => String(e?.error?.error?.message || e?.message || "").slice(0, 200);
 const MODEL = "claude-opus-5";
 const DAILY_LIMIT = Number(process.env.SUMMARY_DAILY_LIMIT || 5);
 
@@ -137,7 +139,8 @@ export default async (req) => {
       return badRequest("混み合っています。少し待ってからお試しください", 429);
     }
     if (error instanceof Anthropic.APIError) {
-      return badRequest(`要約に失敗しました（${error.status}）`, 502);
+      console.error("anthropic", error.status, why(error));
+      return badRequest(`要約に失敗しました（${error.status}：${why(error)}）`, 502);
     }
     throw error;
   }

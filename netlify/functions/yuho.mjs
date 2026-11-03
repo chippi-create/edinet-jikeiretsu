@@ -13,6 +13,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 
+// APIが返したエラーの理由（キーや送った本文は含まれない）。400の原因を画面で分かるようにする
+const why = (e) => String(e?.error?.error?.message || e?.message || "").slice(0, 200);
 const MODEL = "claude-opus-5";
 const DAILY_LIMIT = Number(process.env.YUHO_DAILY_LIMIT || 60);
 const MAX_MATERIAL = 30000;
@@ -112,7 +114,7 @@ export default async (req) => {
     summary = response.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
   } catch (error) {
     if (error instanceof Anthropic.RateLimitError) return bad("混み合っています。少し待ってからお試しください", 429);
-    if (error instanceof Anthropic.APIError) return bad(`要約に失敗しました（${error.status}）`, 502);
+    if (error instanceof Anthropic.APIError) { console.error("anthropic", error.status, why(error)); return bad(`要約に失敗しました（${error.status}：${why(error)}）`, 502); }
     throw error;
   }
   // 本文より前に余計な文字列が混ざることがある。出力は「・」で始まる箇条書きなので、

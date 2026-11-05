@@ -53,6 +53,9 @@ function bad(message, status = 400) {
 }
 
 export default async (req) => {
+  // 提案書ツールは有報の本文をそのまま出すようになり、ここを呼ぶ所が無くなった（2026-11-06）。
+  // 誰でも叩けてOpusのクレジットを使うので止めておく。戻すときは環境変数 YUHO_ENABLED=1。
+  if (process.env.YUHO_ENABLED !== "1") return bad("有報の要約は止めています", 410);
   const url = new URL(req.url);
   const code = (url.searchParams.get("code") || "").trim();
   const part = (url.searchParams.get("part") || "").trim();

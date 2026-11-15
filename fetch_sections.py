@@ -56,7 +56,7 @@ SEGMENTS = os.path.join(DATA_DIR, "segments.csv")
 #   {"periods": [{"k": 基準日, "d": docID, "own": [[区分, 株主数, 単元, 割合]], "sh": [[順位, 氏名, 住所, 株数, 単位, 割合]]}]}
 # ownership.csv / shareholders.csv は最新の1期だけを持つ（上書き）。こちらは基準日ごとに積む。
 OWNHIST_DIR = os.path.join(DATA_DIR, "ownhist")
-OWNHIST_KEEP = 5
+OWNHIST_KEEP = 8
 # 証券コード指定のときだけ、前の期の有報からも所有者別・大株主を取る（何期さかのぼるか）。
 PAST_YEARS = int(os.environ.get("PAST_YEARS", "0") or 0)
 # 要約を書くための材料。事業の内容だけでは仕入や販売先が分からないので、

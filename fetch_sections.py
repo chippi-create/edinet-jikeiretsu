@@ -399,6 +399,77 @@ def fetch_hanki(index, state, codes, limit):
     return n
 
 
+# 大株主の推移は2年分（有報2回・半期報告書2回）をそろえる
+TWO_YEARS = int(os.environ.get("OWNHIST_YEARS", "2") or 2)
+
+
+def fill_two_years(index, state, codes, limit):
+    """大株主の推移を2年分（直近の有報2回と半期報告書2回）にそろえる。足りない回の書類だけ取る。
+    会社を指定したときはその会社だけ（上限なし）。指定が無いときは毎日の空き枠（limit 本）で全社を少しずつ。
+    取り終えた会社は state の "推移" に書類の組を記録して、次からは飛ばす。"""
+    if not codes and limit <= 0:
+        return 0
+    by_sec = {}
+    for d in index["docs"].values():
+        sec = (d.get("secCode") or "")[:4]
+        if sec and d.get("docTypeCode") in ("120", "160") and (not codes or sec in codes):
+            by_sec.setdefault(sec, []).append(d)
+    jobs = []
+    for sec in sorted(by_sec):
+        want = []
+        for t in ("120", "160"):
+            docs = sorted((d for d in by_sec[sec] if d.get("docTypeCode") == t),
+                          key=lambda x: x.get("submitDateTime") or "", reverse=True)
+            # 同じ期の書類が2本ある（訂正・決算期変更など）ときは新しい方だけ
+            seen = set()
+            for d in docs:
+                pe = (d.get("periodEnd") or "")[:10]
+                if pe and pe not in seen and len(seen) < TWO_YEARS:
+                    seen.add(pe)
+                    want.append(d)
+        sig = ",".join(sorted(d["docID"] for d in want))
+        if not codes and state.get(sec, {}).get("推移") == sig:
+            continue
+        have = set()
+        hp = os.path.join(OWNHIST_DIR, f"{sec}.json")
+        if os.path.exists(hp):
+            with open(hp, encoding="utf-8") as fp:
+                have = {x.get("k") for x in json.load(fp).get("periods", []) if x.get("sh")}
+        miss = [d for d in want if (interim_end(d) if d["docTypeCode"] == "160" else (d.get("periodEnd") or "")[:10]) not in have]
+        jobs.append((sec, sig, miss))
+    total = sum(len(m) for _, _, m in jobs)
+    if not jobs:
+        return 0
+    log(f"■ 大株主の推移（{TWO_YEARS}年分）: 足りない書類 {total}本 / {len(jobs)}社"
+        + ("" if codes else f"（今回 上限{limit}本）"))
+    n = 0
+    for sec, sig, miss in jobs:
+        if not codes and n + len(miss) > limit:
+            break
+        ok = True
+        for d in miss:
+            half = d["docTypeCode"] == "160"
+            kijun = interim_end(d) if half else (d.get("periodEnd") or "")[:10]
+            z = sections.fetch_zip(d["docID"])
+            n += 1
+            if z is None:
+                log(f"  {sec} {kijun}: ZIPを取得できませんでした")
+                ok = False
+                continue
+            blocks = sections.sections_of(z)
+            sh_rows = parse_shareholders(sections.tables_of(blocks.get("MajorShareholdersTextBlock", "")))
+            own_rows = []
+            if not half:
+                o = parse_ownership(sections.tables_of(blocks.get("ShareholdingByShareholderCategoryTextBlock", "")))
+                own_rows = [{"区分": k, "株主数": v.get("株主数", ""), "所有株式数_単元": v.get("単元", ""),
+                             "割合": v.get("割合", "")} for k, v in o.items()]
+            put_ownhist(sec, kijun, d["docID"], own_rows, sh_rows, src="半期報告書" if half else "有価証券報告書")
+            log(f"  {sec} {kijun}（{'半期' if half else '有報'}・推移）: 大株主{len(sh_rows)}名")
+        if ok:
+            state.setdefault(sec, {})["推移"] = sig
+    return n
+
+
 def fetch_past(index, codes, years):
     """指定した会社の、前の期の有報から所有者別・大株主だけを取る。"""
     by_sec = {}
@@ -486,7 +557,8 @@ def main():
     log(f"■ 索引 {len(picked)}社 / 未取得または更新あり {len(pending)}社")
     if not pending:
         log("■ すべて最新です。")
-        fetch_hanki(index, state, codes, LIMIT)
+        used = fetch_hanki(index, state, codes, LIMIT)
+        fill_two_years(index, state, codes, LIMIT - used)
         save_all(own, sh, of, biz, div, web, segs, state)
         return
     todo = pending[:LIMIT]
@@ -608,8 +680,9 @@ def main():
                       "取得日時": time.strftime("%Y-%m-%dT%H:%M:%S+09:00",
                                              time.gmtime(time.time() + 9 * 3600))}
 
-    # 残りの枠で半期報告書の大株主を取る
-    fetch_hanki(index, state, codes, LIMIT - done)
+    # 残りの枠で半期報告書の大株主を取り、その後で大株主の推移（2年分）をそろえる
+    used = fetch_hanki(index, state, codes, LIMIT - done)
+    fill_two_years(index, state, codes, LIMIT - done - used)
     n = save_all(own, sh, of, biz, div, web, segs, state)
     log("")
     log(f"■ 今回の取得: {done}社")

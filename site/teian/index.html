@@ -253,7 +253,7 @@ import { checklist } from "./sesaku.js";
 import { jigyoBlock } from "./jigyo.js";
 import { keyTable, historyRows, segmentRows, stockFacts, TEXT_PARTS, rightsLine, acqLines, officerRows, ownerHistory } from "./gaiyo.js";
 import { buildMemo } from "./memo.js";
-import { currentTerm, pageBiz } from "./genjo.js";
+import { currentTerm, holderTrend, pageBiz } from "./genjo.js";
 import { decodeCsv, parsePrices, trendOf } from "./kabuka.js";
 import { findChukei } from "./chukei.js";
 
@@ -449,6 +449,8 @@ async function load() {
   renderShindan();
   loadTdnet(code);
   loadIRNow(code);
+  // 大株主の推移（期ごとの記録）。届いたら分析を描き直す
+  loadOwnHist(code).then(() => { if (ctx && ctx.code === code) renderShindan(); });
 }
 
 // ---- 有報の記載 ------------------------------------------------------------
@@ -634,6 +636,21 @@ function bizTableHTML() {
     `</table></div><p class="note">${(pg.notes || []).map(esc).join(" ")}</p>`;
 }
 
+/** 大株主の推移（有報・半期報告書の上位10名、直近2年）。期ごとの記録（/oh/{code}.json）から。 */
+function trendHTML() {
+  let t;
+  try { t = holderTrend(ctx); } catch { return ""; }
+  if (!t) return `<p class="note">大株主の記録がありません。</p>`;
+  return `<div class="bizwrap"><table class="biz">` +
+    `<tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` +
+    t.rows.map((r) => `<tr${r.flag ? ' style="background:#FFF8E6"' : ""}><th style="text-align:left">${esc(r.label)}</th><td>${esc(r.kind)}</td>` +
+      r.cells.map((c) => `<td class="n"${c === "圏外" ? ' style="color:#8A94A3"' : ""}>${esc(c)}</td>`).join("") +
+      (t.periods > 1 ? `<td>${esc(r.note)}</td>` : "") + `</tr>`).join("") +
+    `</table></div><p class="note">比率は自己株式を除く発行済株式数に対する割合。上位10名から外れた回は「圏外」（持株数は書類に載らない）。` +
+    `新たに上位10名に入った・圏外になった・1pt以上動いた株主に色を付けています。` +
+    (t.periods < 4 ? `いまは${t.periods}回分です。2年分（有報2回・半期報告書2回）は毎日の自動更新で順にそろえています。` : "") + `</p>`;
+}
+
 /** 適時開示の表題（直近2年）。民間API（やのしん）から /api/tdnet 経由で取る。 */
 function tdnetHTML() {
   const t = ctx.tdnetState;
@@ -675,6 +692,7 @@ function renderShindan() {
     (big ? `<p class="note"><b>時価総額が1,000億円を超えています</b>（対象の規模の外）。</p>` : "") +
     `<h3>業績（有報・決算短信・中期経営計画）</h3>` + bizTableHTML() +
     `<p class="row" style="margin:4px 0 12px"><button id="irnow" class="ghost">決算短信・中計をIRから読み込んで今期を足す</button><span id="irnowmsg" class="note">${esc(ctx.irMsg || "")}</span></p>` +
+    `<h3>大株主の推移（有報・半期報告書、直近2年）</h3>` + trendHTML() +
     `<h3>施策のチェック表</h3>` +
     `<p class="note">施策ごとに、条件・この会社の値・満たすか（○×、？は値が無い）を並べています。判定は数字の条件だけで出したもので、判断ではありません。` +
     `検討する施策にチェックを入れてください（資料の型は今はMSワラントのみ。他の施策は順に足します）。</p>` +

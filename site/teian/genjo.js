@@ -310,6 +310,46 @@ export function holderPeriods(ctx) {
   };
 }
 
+/**
+ * 大株主の推移。有報・半期報告書の上位10名を、直近2年（有報2回・半期2回）古い順に並べる。
+ * 上位10名から外れた回は「圏外」（書類に持株数が載らないので0とは限らない）。
+ * 行は直近の回の順位順、そのあとに直近で圏外になった株主。
+ */
+export function holderTrend(ctx, max = 4) {
+  let ps = (ctx.ownHist?.periods || []).filter((p) => (p.sh || []).length)
+    .sort((a, b) => String(a.k).localeCompare(String(b.k))).slice(-max);
+  if (!ps.length && (ctx.sec?.sh || []).length) {
+    ps = [{ k: ctx.sec.k?.sh || "", src: "有価証券報告書", sh: ctx.sec.sh }];
+  }
+  if (!ps.length) return null;
+  const lists = ps.map((p) => holderList(p.sh).slice(0, 10));
+  const maps = lists.map((l) => new Map(l.map((h) => [h.key, h])));
+  const last = lists[lists.length - 1];
+  const seen = new Set(last.map((h) => h.key));
+  const gone = [];
+  for (const l of lists.slice(0, -1).reverse()) {
+    for (const h of l) if (!seen.has(h.key)) { seen.add(h.key); gone.push(h); }
+  }
+  const pt = (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}pt`;
+  const rows = [...last, ...gone].map((h) => {
+    const vals = maps.map((m) => m.get(h.key)?.ratio ?? null);
+    const inFirst = maps[0].has(h.key), inLast = maps[maps.length - 1].has(h.key);
+    const firstVal = vals.find((v) => v !== null);
+    let note = "";
+    if (ps.length > 1) {
+      if (!inLast) note = "圏外へ";
+      else if (!inFirst) note = "新たに上位10名";
+      else if (vals[0] !== null && vals[vals.length - 1] !== null) note = pt(vals[vals.length - 1] - vals[0]);
+    }
+    const big = inFirst && inLast && Math.abs((vals[vals.length - 1] ?? 0) - (firstVal ?? 0)) >= 0.01;
+    return { label: h.label, kind: h.kind, cells: vals.map((v) => v === null ? "圏外" : pct(v, 2)), note, flag: !inFirst || !inLast || big };
+  });
+  return {
+    head: ["株主名", "区分", ...ps.map((p) => `${ymOf(p.k)}（${srcShort(p.src)}）`), ps.length > 1 ? "増減・動き" : null].filter(Boolean),
+    rows, periods: ps.length,
+  };
+}
+
 export function pageCapital(ctx) {
   const pf = profile(ctx);
   const per = holderPeriods(ctx);

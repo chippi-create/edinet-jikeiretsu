@@ -30,6 +30,10 @@ th,td{padding:7px 8px; border-bottom:1px solid var(--rule); text-align:right; fo
 th{position:sticky; top:0; background:var(--paper); font-weight:600; z-index:1; vertical-align:bottom}
 th.oa{background:#EEF4FB}
 th.l,td.l{text-align:left}
+th.c,td.c{text-align:center}
+th.blank,td.blank{min-width:2.4em; background:#FAFBFC}
+tr.stop td{color:var(--mute); text-decoration:line-through}
+tr.stop td.name{text-decoration:none}
 td.name{white-space:normal; min-width:9em}
 td.wide{white-space:normal; min-width:16em; max-width:24em}
 .clip{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
@@ -61,7 +65,10 @@ tr.open td{background:#EEF4FB}
       <option>公募</option><option>売出</option><option>第三者割当</option><option>自己株式処分</option>
     </select>
     <select id="mkt"><option value="">すべての市場</option></select>
+    <label style="font-size:12px"><input type="checkbox" id="blank" checked> 空欄の列も出す</label>
+    <button class="btn" id="copy">表をコピー（Excel用）</button>
     <button class="btn" id="csv">CSVで保存</button>
+    <span id="copymsg" class="count" style="padding:0"></span>
   </div>
   <div class="count" id="count">読み込んでいます…</div>
   <div class="tablewrap"><table id="tbl"></table></div>
@@ -69,7 +76,11 @@ tr.open td{background:#EEF4FB}
     数字はお知らせの決まった言い回しから機械的に拾っています（AIには読ませていません）。拾えなかった項目は「—」です。行をクリックすると、もとのお知らせの一覧が出ます。<br>
     条件決定日・受渡日は、価格等の決定のお知らせが出るまで<span class="plan">予定（灰色）</span>で、決定のお知らせが出たら確定日に置き換わります。第三者割当・自己株式処分は決議の時点で条件が決まっているので、条件決定日＝決議日です。<br>
     「市場外の相対取引」の印は、大株主どうしの相対取引による売出し（売出規制の対象）です。引受人による公募・売出しではありません。<br>
-    OA＝オーバーアロットメントによる売出し（決定のお知らせが出た後は確定した株数）。「OA込」はOA分を含めた値です。OAに伴う第三者割当がある案件ではOA分を新株（希薄化）として、無い案件（グリーンシューオプション）では売出として数えます。<br>
+    OA＝オーバーアロットメントによる売出し。OA予定株数は決議のお知らせの上限、OA実施株数は価格等の決定のお知らせで確定した株数です。「OA込み」はOA分を含めた値です。<br>
+    基準株価は、公募・売出しは算定基準日の終値、第三者割当は決議の前営業日の終値です。募集価格は発行価格（無ければ売出価格・処分価額）、引受価額は決定のお知らせの引受価額（公募は払込金額）です。<br>
+    売先指定先は、市場外の相対取引の買い手（資本業務提携の相手）か親引け先です。売出人数はお知らせの売出人を名前で法人・個人に分けて数えています（OAの売出人＝証券会社は除く）。自己株式取得数/発行済株式数は、同時に開示した自己株式取得のお知らせの「取得し得る株式の総数」の割合（発行済株式総数（自己株式を除く）に対する）です。<br>
+    「表をコピー」はExcelにそのまま貼れる形（タブ区切り、空欄の列を含む）です。数字は株・円の元の値で、ディールサイズは円です。<br>
+    「OA込」の値の考え方：OAに伴う第三者割当がある案件ではOA分を新株（希薄化）として、無い案件（グリーンシューオプション）では売出として数えます。<br>
     議決権株式数＝有報の「議決権の状況」の議決権の個数×単元株式数（単元未満株・自己株式を除く）。希薄化率＝（新株＋自己株式処分）÷議決権株式数、売出の割合＝売出株式数÷議決権株式数。<br>
     発行済株式数は、お知らせに「現在の発行済株式総数」があればその値、無ければ直近の有報の値です。自己株式数は直近の有報の値です。募集金額＝発行価格・売出価格・処分価額×株数（条件決定前は空欄）。<br>
     出典：TDnet（東京証券取引所）の適時開示、JPXの上場銘柄一覧、EDINETの有価証券報告書。お知らせの本文は転載していません。必ず元の開示で確かめてください。
@@ -90,36 +101,56 @@ const key = (d) => `${d.コード}-${d.決議日}`;
 // 条件決定日・受渡日：確定していなければ予定（灰色）
 const kettei = (d) => d.条件決定日 ? [d.条件決定日, false] : [d.条件決定日_予定 || "", true];
 const ukewatashi = (d) => {
-  const v = d.受渡日 || d.払込期日;
+  // 「受渡期日 払込期日の翌営業日」と書かれていれば払込期日を受渡日にしない（三協フロンテア）
+  const v = d.受渡日 || (d.受渡日_予定 ? null : d.払込期日);
   return v ? [v, d.状態 === "決議" && !!d.条件決定日_予定] : [d.受渡日_予定 || "", true];
 };
 
-// 一覧の列（順番はご指定どおり。OAの株数だけ、OA込の値の根拠として足している）
+// 日付は yy/mm/dd。予定の期間（「2026-11-16〜2026-11-18」）もそのまま置き換える
+const yy = (s) => String(s || "").replace(/(\d{2})(\d{2})-(\d{2})-(\d{2})/g, "$2/$3/$4");
+const blank = (n) => ["", () => "", "blank"];
+const blanks = (n) => Array.from({ length: n }, blank);
+const sellers = (d, k) => (d.売出人 || []).filter((x) => x[1] === k).length;
+// OAの株数：決議では上限（予定）、価格等の決定で確定（実施）
+const oaPlan = (d) => d.OA予定 ?? (d.状態 === "決議" ? d.OA : null);
+const oaDone = (d) => d.OA実施 ?? null;
+const offerPrice = (d) => d.発行価格 ?? d.売出価格 ?? d.処分価格;
+
+// 一覧の列（順番はご指定どおり。空欄の列はExcelの台帳に貼るための空き）
+// [見出し, 画面の表示, class, 予定（灰色）かどうか, CSV・コピーの値]
 const COLS = [
-  ["海外募集", (d) => d.海外募集 ? "有" : "", "l"],
-  ["コード", (d) => d.コード, "l"],
+  ["海外募集", (d) => d.海外募集 ? "●" : "", "l c"],
+  ["銘柄コード", (d) => d.コード, "l"],
   ["会社名", (d) => d.会社名, "l name"],
   ["市場", (d) => val(d.市場), "l"],
   ["業種", (d) => val(d.業種), "l"],
-  ["決議日", (d) => d.決議日, "l"],
-  ["条件決定日", (d) => kettei(d)[0] || "—", "l", (d) => kettei(d)[1]],
-  ["受渡日", (d) => ukewatashi(d)[0] || "—", "l", (d) => ukewatashi(d)[1]],
-  ["発行済株式数", (d) => int(d.発行済株式数)],
-  ["自己株式数", (d) => int(d.自己株式数)],
-  ["新株", (d) => int(d.新株)],
-  ["売出株式数", (d) => int(d.売出)],
-  ["自己株式処分数", (d) => int(d.処分)],
-  ["OA株数", (d) => int(d.OA), "oa"],
-  ["合計", (d) => int(d.合計_OA除く)],
-  ["合計（OA込）", (d) => int(d.合計_OA含む), "oa"],
-  ["希薄化率", (d) => pct(d.希薄化率_OA除く)],
-  ["希薄化率（OA込）", (d) => pct(d.希薄化率_OA含む), "oa"],
-  ["売出の割合", (d) => pct(d.売出の割合_OA除く)],
-  ["売出の割合（OA込）", (d) => pct(d.売出の割合_OA含む), "oa"],
-  ["募集金額（億円）", (d) => oku(d.募集金額_OA除く)],
-  ["募集金額（OA込・億円）", (d) => oku(d.募集金額_OA含む), "oa"],
-  ["資金使途", (d) => val(d.資金使途), "l wide"],
-  ["同時に開示したもの", (d) => (d.同時開示 || []).join(" ／ ") || "—", "l wide"],
+  ["決議日", (d) => yy(d.決議日), "l"],
+  ["条件決定日", (d) => yy(kettei(d)[0]) || "—", "l", (d) => kettei(d)[1]],
+  ["受渡日", (d) => yy(ukewatashi(d)[0]) || "—", "l", (d) => ukewatashi(d)[1]],
+  ["発行済株式数", (d) => int(d.発行済株式数), "", null, (d) => d.発行済株式数],
+  ["自己株式保有数", (d) => int(d.自己株式数), "", null, (d) => d.自己株式数],
+  ...blanks(1),
+  ["公募増資（自己株処分除く）", (d) => int(d.新株), "", null, (d) => d.新株],
+  ["売出株数", (d) => int(d.売出), "", null, (d) => d.売出],
+  ["自己株式処分数", (d) => int(d.処分), "", null, (d) => d.処分],
+  ["合計（公募増資・自己株式処分・売出）", (d) => int(d.合計_OA除く), "", null, (d) => d.合計_OA除く],
+  ...blanks(9),
+  ["ＯＡ予定株数", (d) => int(oaPlan(d)), "oa", null, oaPlan],
+  ["ＯＡ実施株数", (d) => int(oaDone(d)), "oa", null, oaDone],
+  ...blanks(5),
+  ["基準株価", (d) => int(d.基準株価), "", null, (d) => d.基準株価],
+  ["募集価格", (d) => int(offerPrice(d)), "", null, offerPrice],
+  ["引受価額", (d) => int(d.引受価額), "", null, (d) => d.引受価額],
+  ...blanks(12),
+  ["売先指定先", (d) => val(d.売先指定先), "l"],
+  ["第三者割当先", (d) => val(d.割当先), "l"],
+  ["売出人数（個人）", (d) => d.売出人 ? sellers(d, "個人") : "—", "", null, (d) => d.売出人 ? sellers(d, "個人") : ""],
+  ["売出人数（法人）", (d) => d.売出人 ? sellers(d, "法人") : "—", "", null, (d) => d.売出人 ? sellers(d, "法人") : ""],
+  ["プライム市場変更の有無", (d) => d.プライム変更 ? "有" : "", "l c"],
+  ["自己株式取得数/発行済株式数", (d) => d.自己株取得 ? `${d.自己株取得.割合}%` : "", "", null, (d) => d.自己株取得 ? `${d.自己株取得.割合}%` : ""],
+  ["同時開示しているもの", (d) => (d.同時開示 || []).join(" ／ ") || "—", "l wide", null, (d) => (d.同時開示 || []).join(" ／ ")],
+  ["ディールサイズ（ＯＡ抜き・億円）", (d) => oku(d.募集金額_OA除く), "", null, (d) => d.募集金額_OA除く],
+  ["ディールサイズ（ＯＡ込み・億円）", (d) => oku(d.募集金額_OA含む), "oa", null, (d) => d.募集金額_OA含む],
 ];
 
 function filtered() {
@@ -140,7 +171,13 @@ function detail(d) {
       ["処分価額", d.処分価格 ? `${int(d.処分価格)}円` : "—"],
       ["ディスカウント率", no(d.ディスカウント率) ? "—" : `${d.ディスカウント率}%`],
       ["割当先", esc(d.割当先 || "—")],
+      ["売出人", (d.売出人 || []).map(([n, k]) => `${esc(n)}（${esc(k)}）`).join("<br>") || "—"],
+      ["OAに伴う第三者割当", d.OA三者_確定 ? `${int(d.OA三者_確定)}株を発行（確定）` : (d.OA三者 ? `${int(d.OA三者)}株まで` : "—")],
+      ["同時の自己株式取得", d.自己株取得 ? `${int(d.自己株取得.株数)}株まで（発行済株式総数（自己株式を除く）の${d.自己株取得.割合}%）` : "—"],
       ["議決権株式数", `${int(d.議決権株式数)}${d.議決権の基準 ? `（${esc(d.議決権の基準)}の有報）` : ""}`],
+      ["希薄化率（OA込）", `${pct(d.希薄化率_OA除く)}（${pct(d.希薄化率_OA含む)}）`],
+      ["売出の割合（OA込）", `${pct(d.売出の割合_OA除く)}（${pct(d.売出の割合_OA含む)}）`],
+      ["資金使途", esc(d.資金使途 || "—")],
       ["発行済株式数の基準", esc(d.株式数の基準 || "—")],
     ])}</div>
     <div><h4>お知らせ（TDnetの公開は約1か月）</h4><table class="kv">${notes}</table></div>
@@ -148,20 +185,24 @@ function detail(d) {
   </div>`;
 }
 
+const shown = () => $("blank").checked ? COLS : COLS.filter(([, , c]) => c !== "blank");
+
 function render() {
   const list = filtered();
-  const head = `<tr>${COLS.map(([h, , c]) => `<th class="${c || ""}">${esc(h)}</th>`).join("")}</tr>`;
+  const cols = shown();
+  const head = `<tr>${cols.map(([h, , c]) => `<th class="${c || ""}">${esc(h)}</th>`).join("")}</tr>`;
   let body = "";
   for (const d of list) {
-    body += `<tr class="deal${openKey === key(d) ? " open" : ""}" data-k="${esc(key(d))}">` + COLS.map(([h, f, c, plan]) => {
+    body += `<tr class="deal${openKey === key(d) ? " open" : ""}${d.状態 === "中止" ? " stop" : ""}" data-k="${esc(key(d))}">` + cols.map(([h, f, c, plan]) => {
       let v = esc(f(d));
       if (plan && plan(d) && v !== "—") v = `<span class="plan">${v}（予定）</span>`;
-      if (h === "会社名") v += `<span class="tag">${esc(d.種類 || "")}</span>` + (d.市場外 ? `<span class="tag" style="background:#FFF4E5;border-color:#F0C27B">市場外の相対取引</span>` : "");
+      if (h === "会社名") v += `<span class="tag">${esc(d.種類 || "")}</span>` + (d.市場外 ? `<span class="tag" style="background:#FFF4E5;border-color:#F0C27B">市場外の相対取引</span>` : "")
+        + (d.状態 === "中止" ? `<span class="tag" style="background:#FDECEC;border-color:#E8A0A0">中止</span>` : "");
       // 長い文は2行で切る（全文は行をクリックした詳細とCSVで）
       if ((c || "").includes("wide")) v = `<div class="clip" title="${esc(f(d))}">${v}</div>`;
       return `<td class="${(c || "").replace("oa", "")}">${v}</td>`;
     }).join("") + `</tr>`;
-    if (openKey === key(d)) body += `<tr class="detail"><td colspan="${COLS.length}">${detail(d)}</td></tr>`;
+    if (openKey === key(d)) body += `<tr class="detail"><td colspan="${cols.length}">${detail(d)}</td></tr>`;
   }
   $("tbl").innerHTML = head + body;
   $("count").textContent = list.length ? `${list.length}件` : "該当する案件はありません";
@@ -170,25 +211,30 @@ function render() {
   }
 }
 
+// CSV・コピーは画面と同じ列の並び（空欄の列も含む）で、数字は元の値（株・円）。ディールサイズは円
+function rows() {
+  const plain = (s) => String(s ?? "").replace(/（予定）$/, "");
+  const head = COLS.map(([h]) => h.replace("・億円", "・円"));
+  const body = filtered().map((d) => COLS.map(([h, f, c, plan, raw]) => {
+    if (c === "blank") return "";
+    if (raw) return raw(d) ?? "";
+    const v = f(d);
+    return v === "—" ? "" : plain(v) + (plan && plan(d) && v ? "（予定）" : "");
+  }));
+  return [head, ...body];
+}
+
+function copy() {
+  // Excelに貼る用。タブ区切り（列の中のタブ・改行は空白にする）
+  const tsv = rows().map((r) => r.map((v) => String(v).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\r\n");
+  navigator.clipboard.writeText(tsv).then(
+    () => { $("copymsg").textContent = "コピーしました。Excelに貼り付けてください。"; },
+    () => { $("copymsg").textContent = "コピーできませんでした。CSVで保存してください。"; });
+}
+
 function csv() {
-  // CSVは画面の表示ではなく元の値（円・株・%）で出す
-  const RAW = [
-    ["海外募集", (d) => d.海外募集 ? "有" : ""], ["コード", (d) => d.コード], ["会社名", (d) => d.会社名],
-    ["市場", (d) => d.市場], ["業種", (d) => d.業種], ["決議日", (d) => d.決議日],
-    ["条件決定日", (d) => kettei(d)[0] + (kettei(d)[1] && kettei(d)[0] ? "（予定）" : "")],
-    ["受渡日", (d) => ukewatashi(d)[0] + (ukewatashi(d)[1] && ukewatashi(d)[0] ? "（予定）" : "")],
-    ["発行済株式数", (d) => d.発行済株式数], ["自己株式数", (d) => d.自己株式数],
-    ["新株", (d) => d.新株], ["売出株式数", (d) => d.売出], ["自己株式処分数", (d) => d.処分], ["OA株数", (d) => d.OA],
-    ["合計", (d) => d.合計_OA除く], ["合計（OA込）", (d) => d.合計_OA含む],
-    ["希薄化率(%)", (d) => d.希薄化率_OA除く], ["希薄化率（OA込）(%)", (d) => d.希薄化率_OA含む],
-    ["売出の割合(%)", (d) => d.売出の割合_OA除く], ["売出の割合（OA込）(%)", (d) => d.売出の割合_OA含む],
-    ["募集金額(円)", (d) => d.募集金額_OA除く], ["募集金額（OA込）(円)", (d) => d.募集金額_OA含む],
-    ["資金使途", (d) => d.資金使途], ["同時に開示したもの", (d) => (d.同時開示 || []).join(" ／ ")],
-    ["種類", (d) => d.種類 + (d.市場外 ? "（市場外の相対取引）" : "")], ["状態", (d) => d.状態], ["発行価格", (d) => d.発行価格], ["売出価格", (d) => d.売出価格],
-    ["処分価額", (d) => d.処分価格], ["議決権株式数", (d) => d.議決権株式数],
-  ];
   const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
-  const lines = [RAW.map(([h]) => h).join(",")].concat(filtered().map((d) => RAW.map(([, f]) => q(f(d))).join(",")));
+  const lines = rows().map((r) => r.map(q).join(","));
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -203,8 +249,9 @@ fetch("/po.json").then((r) => r.json()).then((j) => {
   $("mkt").innerHTML += mk.map((m) => `<option>${esc(m)}</option>`).join("");
   render();
 }).catch(() => { $("count").textContent = "一覧を読み込めませんでした。"; });
-for (const id of ["q", "kind", "mkt"]) $(id).addEventListener("input", render);
+for (const id of ["q", "kind", "mkt", "blank"]) $(id).addEventListener("input", render);
 $("csv").onclick = csv;
+$("copy").onclick = copy;
 </script>
 </body>
 </html>

@@ -39,7 +39,7 @@ JPX_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001v
 # 何日さかのぼって一覧を見るか。TDnetの公開は約1か月なので、それより前は取れない。
 PO_DAYS = int(os.environ.get("PO_DAYS", "4") or 4)
 # 読み取りの版。読み方を直したら変える。版が違うお知らせは、PDFが残っていれば読み直す。
-PARSE_VERSION = "2026-11-03e"
+PARSE_VERSION = "2026-11-15d"
 
 INC = r"売出|新株式発行|新株式の発行|募集株式|自己株式の処分|自己株式処分|第三者割当|公募|発行価格|海外募集"
 # 新株予約権（MSワラントは別の一覧）、株式報酬・従業員向け、子会社の増資、種類株式、IPO・立会外分売は外す
@@ -139,8 +139,20 @@ def scan(st):
                 continue
             d = po_parse.parse(raw, r["title"])
             same = [x["title"] for x in rows if x["code"] == r["code"] and x["pdf"] != r["pdf"]]
+            # 同時に開示した自己株式取得：取得し得る株式の総数と、発行済株式総数（自己株式を除く）に対する割合
+            bb = None
+            if d["種別"] == "決議":
+                for x in rows:
+                    if x["code"] == r["code"] and re.search(r"自己株式(?:の)?取得に係る事項の決定", x["title"]) \
+                            and not re.search(r"経過|結果|終了|状況", x["title"]):
+                        braw = pdf_text(x["pdf"])
+                        bb = po_parse.buyback(braw) if braw else None
+                        if bb:
+                            break
             rec = {"id": nid, "日": key, "時刻": r["time"], "コード": r["code"][:4], "会社名_TDnet": r["name"],
-                   "表題": r["title"], "版": PARSE_VERSION, "同時開示": same, **d}
+                   "表題": r["title"], "版": PARSE_VERSION, "同時開示": same, **d,
+                   "自己株取得": bb,
+                   "プライム変更": d.get("プライム変更") or any(re.search(r"プライム市場", x) for x in same)}
             save(os.path.join(DOC_DIR, f"{nid}.json"), rec)
             st["notices"][nid] = PARSE_VERSION
             n += 1
@@ -232,7 +244,8 @@ def build():
 
     FIELDS = ("新株", "売出", "OA", "OA三者", "処分", "発行価格", "売出価格", "処分価格", "条件決定日_予定",
               "受渡日", "受渡日_予定", "払込期日", "発行済株式数_お知らせ", "資金使途", "割当先", "海外募集",
-              "発行価格の総額", "売出価格の総額", "処分価額の総額", "市場外")
+              "発行価格の総額", "売出価格の総額", "処分価額の総額", "市場外",
+              "基準株価", "売出人", "売先指定先", "自己株取得", "プライム変更")
     for n in notes:
         kind = n["種別"]
         if kind == "参考":
@@ -248,6 +261,9 @@ def build():
             d["会社名_TDnet"] = n["会社名_TDnet"]
             d["同時開示"] = sorted(set(d["同時開示"]) | set(n.get("同時開示") or []))
             d["お知らせ"].append({"id": n["id"], "日": n["日"], "表題": n["表題"], "種別": kind})
+            # OAの株数は決議では上限（予定）、価格等の決定で確定（実施）する
+            if n.get("OA"):
+                d["OA予定"] = n["OA"]
             # 第三者割当・自己株式処分は決議の時点で価格が決まっている
             # 市場外の相対取引による売出しも、価格は決議（連絡）の時点で決まっている
             if (re.search(r"第三者割当|自己株式の?処分", n["表題"]) or n.get("市場外")) and not n.get("OA"):
@@ -266,12 +282,23 @@ def build():
                 for f in ("新株", "売出", "処分", "条件決定日_予定"):
                     if n.get(f):
                         d[f] = n[f]
+                if n.get("OA"):
+                    d["OA予定"] = n["OA"]
             if kind == "決定":
                 d["条件決定日"] = n.get("算定基準日") or n["日"]
+                d["OA実施"] = n.get("OA") or 0
+                for f in ("基準株価", "引受価額"):
+                    if n.get(f):
+                        d[f] = n[f]
                 d["ディスカウント率"] = n.get("ディスカウント率")
                 d["状態"] = "条件決定"
         elif kind == "完了":
             d["状態"] = "払込完了"
+            # OAに伴う第三者割当で実際に発行した株数（シンジケートカバー取引の残り）
+            if n.get("発行新株式数_確定") and d.get("OA三者"):
+                d["OA三者_確定"] = n["発行新株式数_確定"]
+        elif kind == "中止":
+            d["状態"] = "中止"
 
     out = list(deals.values())
     j = jpx()
@@ -322,8 +349,17 @@ def build():
                     amt += q * p
         d["募集金額_OA除く"] = round(amt) if ok and amt else None
         d["募集金額_OA含む"] = round(amt + oa * (ps or 0)) if ok and amt and (not oa or ps) else None
-        d["種類"] = "・".join(x for x, q in (("公募", new and not re.search(r"第三者割当", " ".join(o["表題"] for o in d["お知らせ"]))),
-                                            ("第三者割当", new and re.search(r"第三者割当", " ".join(o["表題"] for o in d["お知らせ"]))),
+        # 決議のお知らせの表題で見る（「第三者割当増資における発行株式数の確定」はOAのためで、公募の案件にも出る）
+        heads = " ".join(o["表題"] for o in d["お知らせ"] if o["種別"] in ("決議", "変更"))
+        # 売先指定先は売出しがある案件だけ（アドウェイズは第三者割当で、提携相手が筆頭株主から買う話は売出しではない）
+        if not sec:
+            d["売先指定先"] = None
+        # 第三者割当先が本文から取れなければ、表題の資本業務提携の相手（「伊藤忠商事株式会社との資本業務提携、第三者割当…」）
+        if (new or tr) and not d.get("割当先") and re.search(r"第三者割当", heads):
+            m = re.search(r"([^\s、。()「」]{2,40}?)との(?:戦略的)?(?:資本業務提携|業務資本提携|資本提携)", heads)
+            d["割当先"] = m.group(1) if m else None
+        d["種類"] = "・".join(x for x, q in (("公募", new and not re.search(r"第三者割当", heads)),
+                                            ("第三者割当", new and re.search(r"第三者割当", heads)),
                                             ("売出", sec), ("自己株式処分", tr)) if q)
     out.sort(key=lambda d: d["決議日"] or "", reverse=True)
     gen = time.strftime("%Y-%m-%dT%H:%M:%S+09:00", time.gmtime(time.time() + 9 * 3600))

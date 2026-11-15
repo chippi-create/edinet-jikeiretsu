@@ -1060,7 +1060,7 @@ function needTanshin() {
 
 /**
  * 今期の決算短信（通期の短信と各四半期）をIRから探して読み込む。提案書を作るときに1回だけ。
- * 有報の直近期末より後に出た短信を新しい順に4本まで。中期経営計画も1本あれば一緒に入れる（文章の材料）。
+ * 有報の直近期末より後に出た短信を新しい順に4本まで。足元の決算説明資料1本と中期経営計画1本もあれば一緒に入れる（文章の材料）。
  */
 async function autoTanshin() {
   ctx.irAutoDone = true;
@@ -1074,16 +1074,31 @@ async function autoTanshin() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode: "find", code: ctx.code, url: $("irurl").value.trim() || undefined }),
     });
-    const j = await res.json();
-    if (!res.ok) { el.textContent = "IRから短信を取れなかった。「IR資料を探す」から読み込める。"; return; }
+    const j = await res.json().catch(() => ({}));
     const have = $("material").value;
-    const docs = j.docs || [];
+    // 会社のIRページで見つからない会社がある（サイトが分からない、一覧の作りが読めない）。
+    // 適時開示（TDnet）のPDFは約1か月残るので、その間はTDnetからも取る。決算の直後はたいていこれで取れる。
+    const tdnet = ctx.tdnetState?.items || await fetch(`${API}/api/tdnet?code=${encodeURIComponent(ctx.code)}`)
+      .then((r) => r.ok ? r.json() : {}).then((x) => x.items || []).catch(() => []);
+    const alive = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    const key = (t) => String(t || "").normalize("NFKC").replace(/\s/g, "");
+    const docs = [...(res.ok ? j.docs || [] : [])];
+    const seen = new Set(docs.map((d) => key(d.title)));
+    for (const x of tdnet) {
+      if (x.date < alive || seen.has(key(x.title)) || /訂正/.test(x.title)) continue;
+      const kind = /決算短信/.test(x.title) ? "決算短信" : /決算説明|説明資料|プレゼンテーション/.test(x.title) ? "決算説明資料" : null;
+      if (kind) { docs.push({ kind, title: x.title, date: x.date, url: x.url }); seen.add(key(x.title)); }
+    }
+    if (!docs.length) { el.textContent = "IRからも適時開示からも短信を取れなかった。「IR資料を探す」から読み込める。"; return; }
     const pick = [
       ...docs.filter((d) => d.kind === "決算短信" && (d.date || "") >= since)
         .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 4),
+      // 足元の決算説明資料（いちばん新しい1本）。数字は短信から取り、こちらは文章の材料
+      ...docs.filter((d) => d.kind === "決算説明資料" && (d.date || "") >= since)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 1),
       ...(/中期経営計画/.test(have) ? [] : docs.filter((d) => d.kind === "中期経営計画").slice(0, 1)),
     ].filter((d) => !have.includes(d.title));
-    if (!pick.length) { el.textContent = "今期の決算短信がIRに見つからなかった。"; return; }
+    if (!pick.length) { el.textContent = "今期の決算短信が、IRにも直近1か月の適時開示にも見つからなかった。"; return; }
     const parts = [];
     for (let i = 0; i < pick.length; i++) {
       const d = pick[i];

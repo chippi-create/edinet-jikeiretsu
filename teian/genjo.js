@@ -315,9 +315,13 @@ export function holderPeriods(ctx) {
  * 上位10名から外れた回は「圏外」（書類に持株数が載らないので0とは限らない）。
  * 行は直近の回の順位順、そのあとに直近で圏外になった株主。
  */
-export function holderTrend(ctx, max = 4) {
-  let ps = (ctx.ownHist?.periods || []).filter((p) => (p.sh || []).length)
-    .sort((a, b) => String(a.k).localeCompare(String(b.k))).slice(-max);
+export function holderTrend(ctx, each = 2) {
+  // 有報・半期報告書それぞれ新しいほうから each 回（前の期の有報も記録にあるので、新しい順に4回だと有報ばかりになる）
+  const all = (ctx.ownHist?.periods || []).filter((p) => (p.sh || []).length)
+    .sort((a, b) => String(b.k).localeCompare(String(a.k)));
+  const half = all.filter((p) => /半期/.test(p.src || "")).slice(0, each);
+  const yuho = all.filter((p) => !/半期/.test(p.src || "")).slice(0, each);
+  let ps = [...yuho, ...half].sort((a, b) => String(a.k).localeCompare(String(b.k)));
   if (!ps.length && (ctx.sec?.sh || []).length) {
     ps = [{ k: ctx.sec.k?.sh || "", src: "有価証券報告書", sh: ctx.sec.sh }];
   }

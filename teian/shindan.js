@@ -58,7 +58,8 @@ export function holderKind(name) {
   const n = String(name || "").replace(/[（(]?常任代理人.*$/, "").replace(/\s+/g, "");
   if (/信託口|信託銀行.*口|カストディ|マスタートラスト|資産管理サービス|ノミニー|NOMINEE|CUSTODY|BNYM|STATESTREET|STATE STREET|JPMORGAN|JP MORGAN|GOLDMAN|MORGAN STANLEY|BNP|HSBC|CITI|UBS|BARCLAYS/i.test(n)) return "信託・カストディ";
   if (/自己株|自社株/.test(n)) return "自己株式";
-  if (/持株会/.test(n)) return "持株会";
+  // 「ヰセキ株式保有会」「○○取引先持株会」のように書く会社もある（井関農機）
+  if (/持株会|株式保有会|株主会$/.test(n)) return "持株会";
   if (/証券|證券/.test(n)) return "証券会社";
   if (/銀行|信用金庫|信用組合|農林中央金庫/.test(n)) return "銀行";
   if (/生命保険|損害保険|火災保険|海上火災|火災海上|海上日動|損保|日本生命|明治安田|住友生命|第一生命/.test(n)) return "保険";
